@@ -727,53 +727,37 @@ export default function CustomerSPA() {
       )}
 
       {/* HEADER CAPSULE */}
-      <header className="sticky top-4 z-40 mx-4 md:mx-auto max-w-4xl rounded-full border border-white/20 dark:border-slate-800/40 bg-white/70 dark:bg-[#0c1428]/75 backdrop-blur-md shadow-lg transition-all duration-300 py-2.5 px-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-[#132d66] flex items-center justify-center text-white shadow-inner">
-            <Utensils size={20} strokeWidth={2} />
+      <header className="sticky top-4 z-40 mx-4 md:mx-auto max-w-4xl rounded-full border border-white/70 dark:border-slate-800/70 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl shadow-xl transition-all duration-300 py-3 px-4 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-[#132d66] flex items-center justify-center text-white shadow-lg">
+            <Utensils size={22} strokeWidth={2} />
           </div>
-          <div>
-            <h1 className="font-serif font-bold text-base md:text-lg leading-tight tracking-wide text-[#1A1714] dark:text-white">
-              Meskel House
-            </h1>
-            <p className="font-sans text-[10px] md:text-xs text-neutral-500 dark:text-slate-400 font-medium">
-              Fine dining & Ethiopian soul
-            </p>
-          </div>
+          <h1 className="font-serif text-xl md:text-2xl font-bold tracking-tight text-[#1A1714] dark:text-white">
+            Digital Menu
+          </h1>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-4">
-          {/* Header language toggles switcher (inline text selector) */}
-          <div className="flex bg-neutral-100 dark:bg-slate-900/60 p-0.5 rounded-full border border-neutral-200 dark:border-slate-800 text-[10px] font-bold">
-            {(["en", "am", "om"] as const).map((langCode) => (
-              <button
-                key={langCode}
-                onClick={() => handleToggleLanguage(langCode)}
-                className={`px-2 py-1 rounded-full uppercase cursor-pointer transition-colors ${
-                  language === langCode
-                    ? "bg-[#132d66] text-white"
-                    : "text-neutral-500 dark:text-slate-400 hover:text-neutral-700 dark:hover:text-slate-200"
-                }`}
-              >
-                {langCode === "en" ? "EN" : langCode === "am" ? "አማ" : "OR"}
-              </button>
-            ))}
-          </div>
-
-          {/* Theme toggler */}
+        <div className="flex items-center gap-3">
           <button
-            onClick={handleToggleTheme}
-            className="p-2 rounded-full text-neutral-700 dark:text-slate-200 hover:bg-neutral-100 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
-            aria-label="Toggle Theme"
+            onClick={() => handleToggleLanguage(language)}
+            className="inline-flex items-center gap-2 rounded-full bg-white border border-neutral-200 px-3 py-2 text-sm font-semibold text-[#1A1714] shadow-sm transition-all duration-200 hover:bg-neutral-100"
           >
-            {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+            <Globe size={16} />
+            {language.toUpperCase()}
           </button>
 
-          {/* Hamburger menu button to open utilities tabs */}
+          <button
+            onClick={handleToggleTheme}
+            className="grid place-items-center w-11 h-11 rounded-full bg-white border border-neutral-200 text-[#1A1714] shadow-sm transition-all duration-200 hover:bg-neutral-100"
+            aria-label="Toggle Theme"
+          >
+            {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+          </button>
+
           <button
             onClick={() => openDrawerWithTab("orders")}
-            className="p-2 rounded-full text-neutral-700 dark:text-slate-200 hover:bg-neutral-100 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
-            aria-label="Staff Dashboard Options Menu"
+            className="grid place-items-center w-12 h-12 rounded-full bg-[#132d66] text-white shadow-lg transition-all duration-200 hover:bg-[#0f366f]"
+            aria-label="Open Menu"
           >
             <Menu size={20} />
           </button>
@@ -841,7 +825,7 @@ export default function CustomerSPA() {
 
             {/* Categories Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {homeCategories.slice(0, 4).map((catName) => {
+              {homeCategories.map((catName) => {
                 const itemsCount = menuItems.filter(
                   (item) => item.category === catName,
                 ).length;
@@ -869,7 +853,7 @@ export default function CustomerSPA() {
                       const el = document.getElementById("catalog-section");
                       if (el) el.scrollIntoView({ behavior: "smooth" });
                     }}
-                    className="relative group aspect-[16/11] rounded-3xl overflow-hidden shadow-md cursor-pointer hover:shadow-lg transition-all border border-neutral-200/60 dark:border-slate-800/40"
+                    className="relative group aspect-[16/11] rounded-[2rem] overflow-hidden shadow-lg cursor-pointer hover:shadow-xl transition-all duration-300 border border-neutral-200/80 dark:border-slate-800/50"
                   >
                     <img
                       src={img}
@@ -937,13 +921,13 @@ export default function CustomerSPA() {
               </div>
 
               {/* Horizontal Category Scroll Tabs */}
-              <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
+              <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar bg-white/80 dark:bg-slate-950/80 border border-neutral-200/80 dark:border-slate-800/70 rounded-full px-2 py-2 shadow-sm backdrop-blur-md">
                 <button
                   onClick={() => setActiveCategory("All")}
-                  className={`px-4.5 py-2 rounded-full text-xs font-semibold tracking-wide transition-all border shrink-0 ${
+                  className={`min-w-[70px] px-4 py-2 rounded-full text-sm font-semibold tracking-wide transition-all duration-200 shrink-0 ${
                     activeCategory === "All"
-                      ? "bg-[#132d66] text-white border-transparent shadow-md"
-                      : "bg-white dark:bg-[#0c1428]/40 text-neutral-600 dark:text-slate-300 border-neutral-300/80 dark:border-slate-800 hover:border-neutral-400 dark:hover:border-slate-700"
+                      ? "bg-[#132d66] text-white shadow-lg"
+                      : "bg-white dark:bg-[#0c0f1a] text-neutral-700 dark:text-slate-300 border border-neutral-200 dark:border-slate-800 hover:bg-neutral-100 dark:hover:bg-slate-900"
                   }`}
                 >
                   All
@@ -957,10 +941,10 @@ export default function CustomerSPA() {
                     <button
                       key={catName}
                       onClick={() => setActiveCategory(catName)}
-                      className={`px-4.5 py-2 rounded-full text-xs font-semibold tracking-wide transition-all border shrink-0 ${
+                      className={`min-w-[70px] px-4 py-2 rounded-full text-sm font-semibold tracking-wide transition-all duration-200 shrink-0 ${
                         activeCategory === catName
-                          ? "bg-[#132d66] text-white border-transparent shadow-md"
-                          : "bg-white dark:bg-[#0c1428]/40 text-neutral-600 dark:text-slate-300 border-neutral-300/80 dark:border-slate-800 hover:border-neutral-400 dark:hover:border-slate-700"
+                          ? "bg-[#132d66] text-white shadow-lg"
+                          : "bg-white dark:bg-[#0c0f1a] text-neutral-700 dark:text-slate-300 border border-neutral-200 dark:border-slate-800 hover:bg-neutral-100 dark:hover:bg-slate-900"
                       }`}
                     >
                       {catName}
@@ -979,18 +963,18 @@ export default function CustomerSPA() {
               </div>
             ) : (
               /* GRID VIEW (PREMIUM CARD LAYOUT DESIGN MATCHING SCREENSHOT) */
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
                 {filteredMenuItems.map((item) => {
                   const isFav = favorites.includes(item.name);
                   const qtyInCart = cart[item.name] ?? 0;
                   return (
                     <div
                       key={item.id}
-                      className="bg-white dark:bg-[#0c1428]/30 border border-neutral-200/80 dark:border-slate-800/50 rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300 flex flex-col justify-between"
+                      className="bg-white dark:bg-[#0c1428]/30 border border-neutral-200/80 dark:border-slate-800/50 rounded-[1.5rem] overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 flex h-full flex-col"
                     >
                       {/* Image overlay container */}
                       <div
-                        className="relative aspect-[4/3] w-full cursor-pointer"
+                        className="relative aspect-[4/3] w-full overflow-hidden cursor-pointer"
                         onClick={() => {
                           setSelectedItem(item);
                           setDetailQty(1);
@@ -1001,37 +985,7 @@ export default function CustomerSPA() {
                           alt={item.name}
                           className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
-
-                        {/* Top Badges */}
-                        <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1 z-10">
-                          {item.originalPrice && (
-                            <span className="bg-amber-500 text-neutral-950 font-bold text-[8px] uppercase tracking-wider py-0.5 px-2 rounded-full shadow-sm">
-                              -
-                              {Math.round(
-                                ((item.originalPrice - item.price) /
-                                  item.originalPrice) *
-                                  100,
-                              )}
-                              %
-                            </span>
-                          )}
-                          {item.tag && (
-                            <span className="bg-[#132d66] text-white font-bold text-[8px] uppercase tracking-wider py-0.5 px-2 rounded-full flex items-center gap-0.5 shadow-sm">
-                              ★{" "}
-                              {item.tag === "Popular"
-                                ? t("popularBadge")
-                                : item.tag === "New"
-                                  ? t("newBadge")
-                                  : item.tag}
-                            </span>
-                          )}
-                          {!item.availability && (
-                            <span className="bg-rose-500 text-white font-bold text-[8px] uppercase tracking-wider py-0.5 px-2 rounded-full shadow-sm">
-                              {t("soldOut")}
-                            </span>
-                          )}
-                        </div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
 
                         {/* Heart favorite icon inside a beige circle with a white border */}
                         <button
@@ -1054,33 +1008,33 @@ export default function CustomerSPA() {
                       </div>
 
                       {/* Card details */}
-                      <div className="p-3 flex-1 flex flex-col justify-between">
+                      <div className="p-4 flex-1 flex flex-col justify-between min-h-0">
                         <div>
-                          <div className="flex items-start justify-between gap-1.5 mb-1">
+                          <div className="flex items-start justify-between gap-3 mb-2">
                             <h3
                               onClick={() => {
                                 setSelectedItem(item);
                                 setDetailQty(1);
                               }}
-                              className="font-serif text-xs sm:text-sm font-bold text-neutral-900 dark:text-white cursor-pointer hover:underline tracking-wide leading-tight line-clamp-1"
+                              className="font-serif text-sm font-bold text-neutral-900 dark:text-white cursor-pointer tracking-tight leading-tight line-clamp-1"
                             >
                               {item.name}
                             </h3>
-                            <div className="flex items-center gap-0.5 text-[10px] font-bold text-amber-500 shrink-0">
+                            <div className="flex items-center gap-1 text-[11px] font-semibold text-amber-500 shrink-0">
                               <Star
-                                size={10}
+                                size={12}
                                 fill="#eab308"
-                                className="text-amber-500 animate-pulse"
+                                className="text-amber-500"
                               />
                               <span>{item.rating}</span>
                             </div>
                           </div>
-                          <p className="text-[10px] sm:text-xs text-neutral-500 dark:text-slate-400 line-clamp-1 leading-normal mb-2">
+                          <p className="text-[11px] text-neutral-500 dark:text-slate-400 line-clamp-2 leading-snug mb-3">
                             {item.description}
                           </p>
                         </div>
 
-                        <div className="flex items-center justify-between mt-auto pt-2 border-t border-neutral-100 dark:border-slate-800/40">
+                        <div className="flex items-center justify-between mt-auto pt-3 border-t border-neutral-100 dark:border-slate-800/40">
                           <div className="flex items-baseline gap-1">
                             <span className="font-serif text-xs sm:text-sm font-bold text-neutral-900 dark:text-white tracking-wide">
                               {formatPrice(item.price)}
@@ -1123,7 +1077,7 @@ export default function CustomerSPA() {
                                   e.stopPropagation();
                                   addToCart(item.name);
                                 }}
-                                className="bg-[#132d66] hover:bg-[#1f4287] text-white font-bold py-1 px-3 rounded-full hover:scale-105 active:scale-95 transition-transform flex items-center gap-1 text-[10px] shadow-sm shrink-0"
+                                className="inline-flex items-center gap-1 rounded-full px-4 py-2 text-[10px] font-semibold tracking-wide text-white bg-[#132d66] border border-[#132d66] shadow-sm hover:bg-[#1f4287] hover:border-[#1f4287] active:scale-95 transition-all shrink-0"
                               >
                                 <Plus size={10} /> Add
                               </button>
@@ -1144,8 +1098,7 @@ export default function CustomerSPA() {
         </div>
       </main>
 
-      {/* FOOTER */}
-      <footer className="border-t border-neutral-200 dark:border-slate-900 bg-neutral-100 dark:bg-[#050914] py-12 px-6">
+      <footer className="border-t border-neutral-200 dark:border-slate-900 bg-neutral-100 dark:bg-[#050914] py-10 px-6 mt-8">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-[#132d66] flex items-center justify-center text-white">
@@ -1153,10 +1106,7 @@ export default function CustomerSPA() {
             </div>
             <div>
               <p className="font-serif font-bold text-base dark:text-white">
-                Meskel House
-              </p>
-              <p className="text-[10px] text-neutral-500 dark:text-slate-400 font-light">
-                Fine Dining & Ethiopian Soul
+                Digital Menu
               </p>
             </div>
           </div>
@@ -1191,10 +1141,6 @@ export default function CustomerSPA() {
               Reservations
             </a>
           </div>
-
-          <p className="text-xs text-neutral-400 dark:text-slate-500">
-            © 2026 Meskel House. All rights reserved.
-          </p>
         </div>
       </footer>
 
