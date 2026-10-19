@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Brand browns */
+  --color-primary-brown: #2B1810;
+  --color-hover-brown: #3D2415;
+  --color-pressed-brown: #1F110A;
+
+  /* Dark-mode backgrounds */
+  --color-dark-bg: #120B07;
+  --color-dark-bg2: #100906;
+  --color-modal: #150D09;
+  --color-surface: #1C1109;
+  --color-footer: #0D0705;
+
+  /* Light-mode warm caramel palette (inspired by photo 3) */
+  --color-light-bg: #F5ECD7;        /* warm parchment */
+  --color-light-bg2: #EDE0C8;       /* slightly deeper caramel */
+  --color-light-card: #FAF5EC;      /* creamy card surface */
+  --color-light-border: #D4B896;    /* warm tan border */
+  --color-light-text: #2B1810;      /* dark espresso text */
+  --color-light-muted: #7A5C45;     /* muted mocha */
+}
+
 .hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -10,3 +32,28 @@
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideLeft {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-scale-up  { animation: scaleUp  0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-slide-up  { animation: slideUp  0.3s  cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-slide-left{ animation: slideLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-fadeIn    { animation: fadeIn   0.3s  ease forwards; }

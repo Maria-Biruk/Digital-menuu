@@ -1,0 +1,202 @@
+"use client";
+
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  UtensilsCrossed,
+  Lock,
+  User,
+  ArrowLeft,
+  ShieldCheck,
+  ShieldAlert,
+  Wine,
+  UserCheck,
+  CreditCard,
+  Crown,
+  ChefHat
+} from "lucide-react";
+
+export default function AdminLoginPage() {
+  const router = useRouter();
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("demo123");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const roles = [
+    { name: "Super Admin", username: "superadmin", roleKey: "super_admin", target: "/admin/menu", icon: Crown, color: "text-amber-400", desc: "Master Control" },
+    { name: "Admin", username: "admin", roleKey: "admin", target: "/admin/menu", icon: ShieldCheck, color: "text-blue-400", desc: "Limited Ops" },
+    { name: "Kitchen", username: "chef", roleKey: "kitchen", target: "/staff/kitchen", icon: ChefHat, color: "text-emerald-400", desc: "Kitchen Only" },
+    { name: "Bartender", username: "bar", roleKey: "bar", target: "/staff/bar", icon: Wine, color: "text-purple-400", desc: "Bar Only" },
+    { name: "Waiter", username: "waiter", roleKey: "waiter", target: "/staff/floor", icon: UserCheck, color: "text-cyan-400", desc: "Floor Only" },
+    { name: "Cashier", username: "cashier", roleKey: "cashier", target: "/staff/payments", icon: CreditCard, color: "text-amber-300", desc: "Cashier Only" },
+  ];
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    setTimeout(() => {
+      setLoading(false);
+      const lower = username.toLowerCase();
+      let roleKey = "admin";
+      let targetUrl = "/admin/menu";
+
+      if (lower.includes("super") || lower.includes("owner")) {
+        roleKey = "super_admin";
+        targetUrl = "/admin/menu";
+      } else if (lower.includes("bar")) {
+        roleKey = "bar";
+        targetUrl = "/staff/bar";
+      } else if (lower.includes("kitchen") || lower.includes("chef")) {
+        roleKey = "kitchen";
+        targetUrl = "/staff/kitchen";
+      } else if (lower.includes("waiter") || lower.includes("floor")) {
+        roleKey = "waiter";
+        targetUrl = "/staff/floor";
+      } else if (lower.includes("cashier") || lower.includes("pos")) {
+        roleKey = "cashier";
+        targetUrl = "/staff/payments";
+      } else {
+        roleKey = "admin";
+        targetUrl = "/admin/menu";
+      }
+
+      localStorage.setItem("staff_role", roleKey);
+      router.push(targetUrl);
+    }, 400);
+  };
+
+  const handleRoleClick = (role: typeof roles[0]) => {
+    setUsername(role.username);
+    setPassword("demo123");
+    localStorage.setItem("staff_role", role.roleKey);
+    setLoading(true);
+    setTimeout(() => {
+      router.push(role.target);
+    }, 250);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#120B07] text-stone-100 flex flex-col justify-center items-center px-4 relative overflow-hidden font-sans">
+      {/* Decorative Orbs */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-[#2B1810] opacity-40 blur-[130px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-amber-600 opacity-15 blur-[120px] pointer-events-none" />
+
+      <Link
+        href="/meskel-house/order"
+        className="absolute top-6 left-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-stone-400 hover:text-white transition-colors py-2 px-4 rounded-full border border-[#2B1810] bg-[#1C1109]/80 backdrop-blur"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" />
+        Customer Menu
+      </Link>
+
+      <div className="w-full max-w-md my-8">
+        {/* Logo and Brand */}
+        <div className="text-center mb-8 flex flex-col items-center">
+          <div className="w-16 h-16 rounded-2xl bg-[#FAF7F2] flex items-center justify-center shadow-xl shadow-black/40 mb-3 border border-[#3D2415] overflow-hidden">
+            <img
+              src="/skill-coffee-icon.png"
+              alt="Skill Coffee"
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <h1 className="font-serif font-bold text-3xl tracking-wide text-white">
+            Staff Portal
+          </h1>
+          <p className="font-sans text-xs text-stone-400 mt-1 font-medium">
+            Skill Coffee Management & Service Systems
+          </p>
+        </div>
+
+        {/* Login Card */}
+        <div className="rounded-3xl bg-[#1C1109]/90 border border-[#2B1810] backdrop-blur-xl p-8 shadow-2xl relative">
+          {error && (
+            <div className="mb-5 p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/40 text-rose-300 text-xs font-semibold flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5 flex items-center gap-1.5">
+                <User className="w-3 h-3 text-amber-400" /> Username
+              </label>
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter staff username"
+                className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#120B07] text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5 flex items-center gap-1.5">
+                <Lock className="w-3 h-3 text-amber-400" /> Password
+              </label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#120B07] text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
+              />
+              <p className="text-[10px] text-stone-500 mt-1">
+                Demo mode: Any password accepted.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-[#2B1810] hover:bg-[#3D2415] active:bg-[#1F110A] text-white font-bold py-3.5 rounded-xl text-sm transition-all shadow-md mt-2 cursor-pointer border border-[#3D2415] flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                  Accessing Dashboard...
+                </>
+              ) : (
+                "Access Dashboard"
+              )}
+            </button>
+          </form>
+
+          {/* Role Buttons Quick Launch */}
+          <div className="mt-8 pt-6 border-t border-[#2B1810]">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 text-center mb-3">
+              One-Click Role Demo Sign-In
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {roles.map((r) => {
+                const Icon = r.icon;
+                return (
+                  <button
+                    key={r.name}
+                    type="button"
+                    onClick={() => handleRoleClick(r)}
+                    className="p-2.5 rounded-xl bg-[#120B07] hover:bg-[#2B1810] border border-[#2B1810] hover:border-amber-500/50 flex flex-col items-center gap-1 transition-all text-center group cursor-pointer"
+                  >
+                    <Icon className={`w-4 h-4 ${r.color} group-hover:scale-110 transition-transform`} />
+                    <span className="text-[11px] font-bold text-stone-200 group-hover:text-white leading-tight">
+                      {r.name}
+                    </span>
+                    <span className="text-[9px] text-stone-500 font-medium">
+                      {r.desc}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

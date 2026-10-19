@@ -1,0 +1,11 @@
+{
+    "name": "digital-menu-backend",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "smoke": "node --env-file=.env scripts/smoke.mjs"
+    },
+    "dependencies": {
+        "@supabase/supabase-js": "^2.45.0"
+    }
+}
