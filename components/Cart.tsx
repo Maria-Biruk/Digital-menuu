@@ -46,7 +46,7 @@ export default function Cart({
   if (lineDetails.length === 0) {
     return (
       <div className={`text-center py-12 px-4 flex flex-col items-center justify-center ${className}`}>
-        <div className="w-16 h-16 rounded-full bg-neutral-100 dark:bg-[#1C1109] text-neutral-400 flex items-center justify-center mb-3">
+        <div className="w-16 h-16 rounded-full bg-neutral-100 dark:bg-[#3A241A] text-neutral-400 flex items-center justify-center mb-3">
           <ShoppingBag size={28} className="text-stone-400" />
         </div>
         <p className="font-serif text-base font-bold text-neutral-800 dark:text-stone-200">
@@ -97,7 +97,7 @@ export default function Cart({
                   {(item.price * qty).toLocaleString()} ETB
                 </span>
 
-                <div className="flex items-center bg-neutral-100 dark:bg-[#1C1109] rounded-full border border-neutral-200 dark:border-stone-800 p-0.5">
+                <div className="flex items-center bg-neutral-100 dark:bg-[#3A241A] rounded-full border border-neutral-200 dark:border-stone-800 p-0.5">
                   <button
                     type="button"
                     onClick={() => onUpdateQty(item.id, qty - 1)}
@@ -123,7 +123,7 @@ export default function Cart({
       </div>
 
       {/* Bill Breakdown */}
-      <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-[#1C1109]/50 border border-neutral-200/80 dark:border-stone-800 space-y-2 text-xs">
+      <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-[#3A241A]/50 border border-neutral-200/80 dark:border-stone-800 space-y-2 text-xs">
         <div className="flex justify-between text-neutral-600 dark:text-stone-400 font-medium">
           <span>Subtotal</span>
           <span>{subtotal.toLocaleString()} ETB</span>

@@ -64,7 +64,7 @@ export default function PickupCodeEntry({
   };
 
   return (
-    <div className={`p-6 rounded-3xl bg-[#1C1109] border border-stone-800 text-stone-100 shadow-2xl max-w-sm w-full mx-auto ${className}`}>
+    <div className={`p-6 rounded-3xl bg-[#3A241A] border border-stone-800 text-stone-100 shadow-2xl max-w-sm w-full mx-auto ${className}`}>
       <div className="flex items-center justify-between pb-3 mb-4 border-b border-stone-800">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-[#2B1810] text-amber-400 flex items-center justify-center">
@@ -108,7 +108,7 @@ export default function PickupCodeEntry({
               value={digit}
               onChange={(e) => handleChange(idx, e.target.value)}
               onKeyDown={(e) => handleKeyDown(idx, e)}
-              className={`w-14 h-16 text-center text-2xl font-mono font-bold rounded-2xl border bg-[#120B07] text-white focus:outline-none transition-all ${
+              className={`w-14 h-16 text-center text-2xl font-mono font-bold rounded-2xl border bg-[#38210F] text-white focus:outline-none transition-all ${
                 hasError
                   ? 'border-rose-500 text-rose-400 animate-shake'
                   : digit

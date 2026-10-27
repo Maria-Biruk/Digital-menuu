@@ -13,10 +13,10 @@ import {
   ExternalLink,
   ShieldCheck,
   Crown,
-  Lock,
   ChevronDown
 } from "lucide-react";
 import { getRoleInfo } from "@/lib/permissions";
+import { signOutStaff } from "@/lib/supabase";
 
 interface AdminHeaderProps {
   title: string;
@@ -46,18 +46,19 @@ export default function AdminHeader({
     { label: "Menu Catalog", href: "/admin/menu", icon: BookOpen, superOnly: false },
     { label: "Payment Accounts", href: "/admin/payment-accounts", icon: CreditCard, superOnly: true },
     { label: "Table QR Codes", href: "/admin/tables", icon: QrCode, superOnly: false },
-    { label: "Analytics", href: "/admin/analytics", icon: BarChart3, superOnly: true },
+    { label: "Analytics", href: "/admin/analytics", icon: BarChart3, superOnly: false },
   ];
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (typeof window !== "undefined") {
       localStorage.removeItem("staff_role");
     }
+    await signOutStaff();
     router.push("/admin/login");
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-[#1C1109]/95 backdrop-blur-md border-b border-[#2B1810] shadow-md px-4 sm:px-6 py-3.5">
+    <header className="sticky top-0 z-40 bg-[#3A241A]/95 backdrop-blur-md border-b border-[#2B1810] shadow-md px-4 sm:px-6 py-3.5">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
         {/* Left: Brand & Title */}
         <div className="flex items-center gap-3">
@@ -100,31 +101,28 @@ export default function AdminHeader({
         </div>
 
         {/* Center: Admin Sub Navigation */}
-        <nav className="flex items-center overflow-x-auto gap-1 bg-[#120B07] p-1 rounded-xl border border-[#2B1810] hide-scrollbar">
-          {adminNav.map((link) => {
-            const Icon = link.icon;
-            const isActive = pathname === link.href;
-            const isLocked = link.superOnly && !isSuperAdmin;
+        <nav className="flex items-center overflow-x-auto gap-1 bg-[#38210F] p-1 rounded-xl border border-[#2B1810] hide-scrollbar">
+          {adminNav
+            .filter((link) => !link.superOnly || isSuperAdmin)
+            .map((link) => {
+              const Icon = link.icon;
+              const isActive = pathname === link.href;
 
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
-                  isActive
-                    ? "bg-[#2B1810] text-amber-300 font-bold shadow-sm border border-[#3D2415]"
-                    : isLocked
-                    ? "text-stone-500 hover:text-stone-300 hover:bg-[#1C1109]"
-                    : "text-stone-400 hover:text-white hover:bg-[#1C1109]"
-                }`}
-                title={isLocked ? "Super Admin Only" : undefined}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{link.label}</span>
-                {isLocked && <Lock className="w-2.5 h-2.5 text-amber-500/80" />}
-              </Link>
-            );
-          })}
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
+                    isActive
+                      ? "bg-[#2B1810] text-amber-300 font-bold shadow-sm border border-[#3D2415]"
+                      : "text-stone-400 hover:text-white hover:bg-[#3A241A]"
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{link.label}</span>
+                </Link>
+              );
+            })}
         </nav>
 
         {/* Right: Quick jumps */}
@@ -141,7 +139,7 @@ export default function AdminHeader({
 
             {showStationMenu && (
               <div
-                className="absolute right-0 mt-2 w-48 rounded-xl bg-[#1C1109] border border-[#2B1810] shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-fadeIn"
+                className="absolute right-0 mt-2 w-48 rounded-xl bg-[#3A241A] border border-[#2B1810] shadow-2xl p-1.5 z-50 text-xs space-y-0.5 animate-fadeIn"
                 onMouseLeave={() => setShowStationMenu(false)}
               >
                 <Link

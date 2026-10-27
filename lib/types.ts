@@ -8,11 +8,14 @@ export type MealPeriod = 'breakfast' | 'lunch' | 'dinner' | 'all-day';
 
 export type StaffRole = 'super_admin' | 'admin' | 'kitchen' | 'bar' | 'bartender' | 'waiter' | 'cashier' | 'owner';
 
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'served' | 'cancelled';
+// Mirrors the `order_status` enum in Postgres.
+export type OrderStatus = 'received' | 'preparing' | 'ready' | 'served' | 'cancelled';
 
-export type PaymentStatus = 'pending' | 'verified' | 'rejected';
+// Mirrors the `pay_status` enum in Postgres.
+export type PaymentStatus = 'pending_verification' | 'paid' | 'failed' | 'refunded';
 
-export type TicketStatus = 'queue' | 'queued' | 'preparing' | 'ready' | 'completed' | 'served';
+// Mirrors the `ticket_status` enum in Postgres.
+export type TicketStatus = 'held' | 'queued' | 'preparing' | 'ready';
 
 export type ServiceMode = 'together' | 'separate';
 
@@ -84,8 +87,8 @@ export interface Order {
   fulfillment_type: FulfillmentType;
   items: OrderItem[];
   subtotal: number;
-  tax: number;
-  service_charge: number;
+  vat: number;
+  service_fee: number;
   total: number;
   service_mode: ServiceMode;
   status: OrderStatus;
@@ -106,13 +109,14 @@ export interface Payment {
   proof_image?: string;
   transaction_id?: string;
   status: PaymentStatus;
-  created_at: string;
+  created_at?: string;
 }
 
 export interface TicketItem {
   name: string;
   quantity: number;
   notes?: string;
+  image?: string;
 }
 
 export interface Ticket {
@@ -133,6 +137,6 @@ export interface CallWaiterAlert {
   table_id: string;
   table_label: string;
   created_at: string;
-  status: 'pending' | 'acknowledged';
+  status: 'open' | 'pending' | 'acknowledged' | 'resolved';
   notes?: string;
 }

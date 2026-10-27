@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Plus, Minus, Trash2, Banknote, Smartphone, Check, ShoppingBag, Utensils } from 'lucide-react';
-import { MenuItem, FulfillmentType, ServiceMode, PaymentAccount } from '../lib/types';
-import { MENU, TABLES, PAYMENT_ACCOUNTS } from '../lib/mock';
+import { MenuItem, FulfillmentType, ServiceMode, PaymentAccount, Table } from '../lib/types';
+import { fetchCatalog, fetchTables, fetchPaymentAccounts } from '../lib/db';
 import TogetherOrSeparatePrompt from './TogetherOrSeparatePrompt';
 import ProofUpload from './ProofUpload';
 
@@ -23,13 +23,40 @@ export default function WalkInOrderForm({
   const [phone, setPhone] = useState('');
   const [serviceMode, setServiceMode] = useState<ServiceMode>('together');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('cash');
-  const [selectedAccount, setSelectedAccount] = useState<PaymentAccount>(PAYMENT_ACCOUNTS[0]);
+  const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [tables, setTables] = useState<Table[]>([]);
+  const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<PaymentAccount | null>(null);
   const [txId, setTxId] = useState('');
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
 
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [catalog, tbls, accs] = await Promise.all([
+          fetchCatalog(),
+          fetchTables(),
+          fetchPaymentAccounts(),
+        ]);
+        if (!active) return;
+        setMenu(catalog.menu);
+        setTables(tbls);
+        setAccounts(accs);
+        if (accs[0]) setSelectedAccount(accs[0]);
+        if (tbls[0]) setTableLabel(tbls[0].label);
+      } catch (err) {
+        console.error('Failed to load walk-in catalog data', err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Filtered menu items
-  const filtered = MENU.filter((m) =>
+  const filtered = menu.filter((m) =>
     m.name_i18n.en.toLowerCase().includes(search.toLowerCase()) ||
     m.name_i18n.am.toLowerCase().includes(search.toLowerCase())
   );
@@ -50,7 +77,7 @@ export default function WalkInOrderForm({
 
   const cartEntries = Object.entries(cart)
     .map(([id, qty]) => {
-      const item = MENU.find((m) => m.id === id);
+      const item = menu.find((m) => m.id === id);
       return item ? { item, qty } : null;
     })
     .filter(Boolean) as { item: MenuItem; qty: number }[];
@@ -110,7 +137,7 @@ export default function WalkInOrderForm({
               Select Dishes & Drinks
             </h3>
             <span className="text-xs text-stone-400">
-              {MENU.length} items available
+              {menu.length} items available
             </span>
           </div>
 
@@ -121,7 +148,7 @@ export default function WalkInOrderForm({
               placeholder="Search dishes, burgers, tejs, coffee..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-stone-800 bg-[#120B07] text-white text-xs focus:outline-none focus:border-[#2B1810]"
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-stone-800 bg-[#38210F] text-white text-xs focus:outline-none focus:border-[#2B1810]"
             />
           </div>
 
@@ -135,7 +162,7 @@ export default function WalkInOrderForm({
                   className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
                     inCart > 0
                       ? 'bg-[#2B1810]/40 border-amber-500/50 shadow-md'
-                      : 'bg-[#1C1109] border-stone-800 hover:border-stone-700'
+                      : 'bg-[#3A241A] border-stone-800 hover:border-stone-700'
                   }`}
                 >
                   <img
@@ -172,13 +199,13 @@ export default function WalkInOrderForm({
         </div>
 
         {/* Right Col: Order Details & Payment (5 cols) */}
-        <div className="lg:col-span-5 space-y-5 p-5 rounded-3xl bg-[#1C1109] border border-stone-800">
+        <div className="lg:col-span-5 space-y-5 p-5 rounded-3xl bg-[#3A241A] border border-stone-800">
           <h3 className="font-serif text-base font-bold text-white pb-3 border-b border-stone-800">
             Order & Settlement
           </h3>
 
           {/* Fulfillment Toggle */}
-          <div className="grid grid-cols-2 gap-2 bg-[#120B07] p-1 rounded-xl border border-stone-800">
+          <div className="grid grid-cols-2 gap-2 bg-[#38210F] p-1 rounded-xl border border-stone-800">
             <button
               type="button"
               onClick={() => setFulfillment('dine-in')}
@@ -212,9 +239,9 @@ export default function WalkInOrderForm({
               <select
                 value={tableLabel}
                 onChange={(e) => setTableLabel(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-stone-800 bg-[#120B07] text-white text-xs focus:outline-none focus:border-[#2B1810]"
+                className="w-full px-3 py-2 rounded-xl border border-stone-800 bg-[#38210F] text-white text-xs focus:outline-none focus:border-[#2B1810]"
               >
-                {TABLES.map((t) => (
+                {tables.map((t) => (
                   <option key={t.id} value={t.label}>
                     Table {t.label}
                   </option>
@@ -232,7 +259,7 @@ export default function WalkInOrderForm({
                 placeholder="0911..."
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-stone-800 bg-[#120B07] text-white text-xs focus:outline-none focus:border-[#2B1810]"
+                className="w-full px-3 py-2 rounded-xl border border-stone-800 bg-[#38210F] text-white text-xs focus:outline-none focus:border-[#2B1810]"
               >
               </input>
             </div>
@@ -307,7 +334,7 @@ export default function WalkInOrderForm({
                 className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
                   paymentMethod === 'cash'
                     ? 'bg-[#2B1810] text-white border-[#2B1810]'
-                    : 'bg-[#120B07] text-stone-400 border-stone-800'
+                    : 'bg-[#38210F] text-stone-400 border-stone-800'
                 }`}
               >
                 <Banknote size={15} /> Cash Collected
@@ -318,7 +345,7 @@ export default function WalkInOrderForm({
                 className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
                   paymentMethod === 'transfer'
                     ? 'bg-[#2B1810] text-white border-[#2B1810]'
-                    : 'bg-[#120B07] text-stone-400 border-stone-800'
+                    : 'bg-[#38210F] text-stone-400 border-stone-800'
                 }`}
               >
                 <Smartphone size={15} /> Bank / Telebirr
@@ -330,14 +357,14 @@ export default function WalkInOrderForm({
           {paymentMethod === 'transfer' && (
             <div className="space-y-3 pt-2">
               <select
-                value={selectedAccount.id}
+                value={selectedAccount?.id ?? ''}
                 onChange={(e) => {
-                  const found = PAYMENT_ACCOUNTS.find((a) => a.id === e.target.value);
+                  const found = accounts.find((a) => a.id === e.target.value);
                   if (found) setSelectedAccount(found);
                 }}
-                className="w-full px-3 py-2 rounded-xl border border-stone-800 bg-[#120B07] text-white text-xs"
+                className="w-full px-3 py-2 rounded-xl border border-stone-800 bg-[#38210F] text-white text-xs"
               >
-                {PAYMENT_ACCOUNTS.map((a) => (
+                {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.label} ({a.account_number || a.phone_number})
                   </option>
@@ -350,7 +377,7 @@ export default function WalkInOrderForm({
                 placeholder="Transaction ID / Reference *"
                 value={txId}
                 onChange={(e) => setTxId(e.target.value)}
-                className="w-full px-3.5 py-2 rounded-xl border border-stone-800 bg-[#120B07] text-white text-xs focus:outline-none focus:border-[#2B1810]"
+                className="w-full px-3.5 py-2 rounded-xl border border-stone-800 bg-[#38210F] text-white text-xs focus:outline-none focus:border-[#2B1810]"
               />
 
               <ProofUpload onFileSelect={setProofFile} />

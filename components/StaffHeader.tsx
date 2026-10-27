@@ -14,6 +14,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { getRoleInfo } from "@/lib/permissions";
+import { signOutStaff } from "@/lib/supabase";
 
 interface StaffHeaderProps {
   title: string;
@@ -92,15 +93,16 @@ export default function StaffHeader({
     else if (isPaymentsStation) visibleNavLinks = [{ label: "Cashier", href: "/staff/payments", icon: CreditCard }];
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (typeof window !== "undefined") {
       localStorage.removeItem("staff_role");
     }
+    await signOutStaff();
     router.push("/admin/login");
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-[#1C1109]/95 backdrop-blur-md border-b border-[#2B1810] shadow-md px-4 sm:px-6 py-3.5">
+    <header className="sticky top-0 z-40 bg-[#3A241A]/95 backdrop-blur-md border-b border-[#2B1810] shadow-md px-4 sm:px-6 py-3.5">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
         {/* Left: Station Identity */}
         <div className="flex items-center gap-3">
@@ -169,7 +171,7 @@ export default function StaffHeader({
             </div>
           )}
 
-          <nav className="flex items-center overflow-x-auto gap-1 bg-[#120B07] p-1 rounded-xl border border-[#2B1810] hide-scrollbar">
+          <nav className="flex items-center overflow-x-auto gap-1 bg-[#38210F] p-1 rounded-xl border border-[#2B1810] hide-scrollbar">
             {visibleNavLinks.map((link) => {
               const Icon = link.icon;
               const isActive = pathname.startsWith(link.href);
@@ -180,7 +182,7 @@ export default function StaffHeader({
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
                     isActive
                       ? "bg-[#2B1810] text-amber-300 font-bold shadow-sm border border-[#3D2415]"
-                      : "text-stone-400 hover:text-white hover:bg-[#1C1109]"
+                      : "text-stone-400 hover:text-white hover:bg-[#3A241A]"
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />

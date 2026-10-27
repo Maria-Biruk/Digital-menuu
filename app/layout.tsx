@@ -14,8 +14,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Meskel House - Digital Menu",
-  description: "Fine dining & Ethiopian soul at Meskel House, Addis Ababa.",
+  title: "Skill Coffee",
+  description: "Specialty Roasters & Fine Dining — Skill Coffee, Addis Ababa.",
 };
 
 export default function RootLayout({

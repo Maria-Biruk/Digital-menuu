@@ -6,14 +6,14 @@
   /* Brand browns */
   --color-primary-brown: #2B1810;
   --color-hover-brown: #3D2415;
-  --color-pressed-brown: #1F110A;
+  --color-pressed-brown: #2A180B;
 
   /* Dark-mode backgrounds */
-  --color-dark-bg: #120B07;
-  --color-dark-bg2: #100906;
-  --color-modal: #150D09;
-  --color-surface: #1C1109;
-  --color-footer: #0D0705;
+  --color-dark-bg: #38210F;
+  --color-dark-bg2: #2A180B;
+  --color-modal: #38210F;
+  --color-surface: #3A241A;
+  --color-footer: #2A180B;
 
   /* Light-mode warm caramel palette (inspired by photo 3) */
   --color-light-bg: #F5ECD7;        /* warm parchment */
@@ -22,6 +22,34 @@
   --color-light-border: #D4B896;    /* warm tan border */
   --color-light-text: #2B1810;      /* dark espresso text */
   --color-light-muted: #7A5C45;     /* muted mocha */
+
+  /* Unified coffee-brown theme (dark) — warm milk-chocolate, matching the reference */
+  --coffee-hi: #9a6846;             /* caramel glow (top) */
+  --coffee-mid: #8c5a3c;            /* milk-chocolate (main canvas) */
+  --coffee-lo: #7c4d31;             /* deeper coffee (base) */
+}
+
+/* Global canvas so every page shares the same coffee background (and no white flash). */
+html,
+body {
+  min-height: 100%;
+  background-color: var(--coffee-lo);
+}
+
+/* Shared dark background — the cozy coffee-brown gradient used across all pages. */
+.app-bg-dark {
+  background:
+    radial-gradient(1100px 520px at 50% -8%, rgba(224, 176, 122, 0.45), transparent 62%),
+    linear-gradient(180deg, var(--coffee-hi) 0%, var(--coffee-mid) 46%, var(--coffee-lo) 100%);
+  background-attachment: fixed;
+}
+
+/* Shared light background — warm parchment, kept consistent for light mode. */
+.app-bg-light {
+  background:
+    radial-gradient(1100px 520px at 50% -8%, rgba(255, 246, 224, 0.9), transparent 60%),
+    linear-gradient(180deg, #f8f1e0 0%, #efe2c6 100%);
+  background-attachment: fixed;
 }
 
 .hide-scrollbar {

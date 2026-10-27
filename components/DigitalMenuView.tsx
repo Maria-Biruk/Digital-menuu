@@ -31,8 +31,10 @@ import {
   SlidersHorizontal,
   UtensilsCrossed,
 } from 'lucide-react';
-import { Lang, ServiceMode, MenuItem, FulfillmentType } from '../lib/types';
-import { MENU, CATEGORIES, TABLES, SLUG, tI18n, addTicketToStorage } from '../lib/mock';
+import { Lang, ServiceMode, MenuItem, FulfillmentType, Category, Table } from '../lib/types';
+import { SLUG, tI18n } from '../lib/mock';
+import { fetchCatalog, fetchTables } from '../lib/db';
+import { supabaseBrowser, ensureDinerSession } from '../lib/supabase';
 import LanguageSwitcher from './LanguageSwitcher';
 import CallWaiterButton from './CallWaiterButton';
 import Cart, { CartLine } from './Cart';
@@ -65,6 +67,10 @@ export default function DigitalMenuView({
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [serviceMode, setServiceMode] = useState<ServiceMode>('together');
   const [addedItemNotification, setAddedItemNotification] = useState<string | null>(null);
+
+  // Persisted order tracking (survives reload / back-navigation).
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [cartHydrated, setCartHydrated] = useState(false);
 
   // Detail Modal State
   const [selectedDish, setSelectedDish] = useState<MenuItem | null>(null);
@@ -111,13 +117,72 @@ export default function DigitalMenuView({
   };
 
   // Table label resolution
-  const tableObj = TABLES.find((t) => t.id === tableId);
   const tableDisplay =
-    tableId === 'takeaway'
-      ? 'Takeaway Order'
-      : tableObj
-      ? `Table ${tableObj.label}`
-      : `Table ${tableId.toUpperCase()}`;
+    tableId === 'takeaway' ? 'Takeaway Order' : `Table ${tableId.toUpperCase()}`;
+
+  // Real catalog loaded from Supabase (lib/db.fetchCatalog)
+  const [MENU, setMenu] = useState<MenuItem[]>([]);
+  const [CATEGORIES, setCategories] = useState<Category[]>([]);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [tables, setTables] = useState<Table[]>([]);
+  const [placing, setPlacing] = useState(false);
+  const [placeError, setPlaceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [{ categories, menu }, tbls] = await Promise.all([
+          fetchCatalog(),
+          fetchTables().catch(() => [] as Table[]),
+        ]);
+        if (!active) return;
+        setCategories(categories);
+        setMenu(menu);
+        setTables(tbls);
+      } catch (err) {
+        if (active) setCatalogError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Persist the cart and the last-placed order per table, so a page reload or
+  // navigating back never loses the diner's basket or their order-status link.
+  const cartKey = `dm_cart_${slug}_${tableId}`;
+  const orderKey = `dm_active_order_${slug}_${tableId}`;
+
+  useEffect(() => {
+    try {
+      const savedCart = localStorage.getItem(cartKey);
+      if (savedCart) setCartLines(JSON.parse(savedCart));
+      const savedOrder = localStorage.getItem(orderKey);
+      if (savedOrder) setActiveOrderId(savedOrder);
+    } catch {
+      /* ignore malformed storage */
+    }
+    setCartHydrated(true);
+  }, [cartKey, orderKey]);
+
+  useEffect(() => {
+    if (!cartHydrated) return;
+    try {
+      if (cartLines.length) localStorage.setItem(cartKey, JSON.stringify(cartLines));
+      else localStorage.removeItem(cartKey);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [cartLines, cartKey, cartHydrated]);
+
+  const catIdBySlug = useMemo(() => {
+    const map: Record<string, string> = {};
+    CATEGORIES.forEach((c) => {
+      map[c.slug] = c.id;
+    });
+    return map;
+  }, [CATEGORIES]);
 
   // Filter menu items
   const filteredItems = useMemo(() => {
@@ -133,16 +198,18 @@ export default function DigitalMenuView({
         !selectedDietary || (item.dietary_tags && item.dietary_tags.includes(selectedDietary));
       return matchCat && matchSearch && matchDietary;
     });
-  }, [activeCategory, searchQuery, selectedDietary, lang]);
+  }, [MENU, activeCategory, searchQuery, selectedDietary, lang]);
 
   // Featured Categories & Milkshakes for Top Showcase
   const topCoffeeItems = useMemo(() => {
-    return MENU.filter((m) => m.category_id === 'cat-coffee-drinks').slice(0, 4);
-  }, []);
+    const id = catIdBySlug['coffee-drinks'];
+    return id ? MENU.filter((m) => m.category_id === id).slice(0, 4) : [];
+  }, [MENU, catIdBySlug]);
 
   const topMilkshakeItems = useMemo(() => {
-    return MENU.filter((m) => m.category_id === 'cat-milkshakes').slice(0, 4);
-  }, []);
+    const id = catIdBySlug['milkshakes'];
+    return id ? MENU.filter((m) => m.category_id === id).slice(0, 4) : [];
+  }, [MENU, catIdBySlug]);
 
   // Cart operations
   const addToCart = (itemId: string, qty: number = 1, instructions?: string) => {
@@ -198,10 +265,45 @@ export default function DigitalMenuView({
   const hasFood = cartItems.some((ci) => ci.item.station === 'kitchen');
   const hasDrink = cartItems.some((ci) => ci.item.station === 'bar');
 
-  const handlePlaceOrder = () => {
-    if (cartLines.length === 0) return;
-    const fakeOrderId = `ord-${Math.floor(1000 + Math.random() * 9000)}`;
-    router.push(`/${slug}/order/${fakeOrderId}?table=${tableId}&lang=${lang}`);
+  const handlePlaceOrder = async () => {
+    if (cartLines.length === 0 || placing) return;
+    setPlacing(true);
+    setPlaceError(null);
+    try {
+      await ensureDinerSession();
+      const isTakeawayOrder = tableId === 'takeaway';
+      if (!isTakeawayOrder && !tables[0]?.id) throw new Error('No table available for dine-in');
+      const p_items = cartItems.map((ci) => ({ menu_item_id: ci.itemId, quantity: ci.qty }));
+      const notesList = cartItems
+        .filter((ci) => ci.instructions && ci.instructions.trim())
+        .map((ci) => `${tI18n(ci.item.name_i18n, 'en')} x${ci.qty}: ${ci.instructions!.trim()}`);
+      const p_service_mode =
+        hasFood && hasDrink ? (serviceMode === 'separate' ? 'separate' : 'together') : 'not_applicable';
+
+      const { data, error } = await supabaseBrowser().rpc('create_order', {
+        p_fulfillment: isTakeawayOrder ? 'takeaway' : 'dine_in',
+        p_table_id: isTakeawayOrder ? null : (tables[0]?.id ?? null),
+        p_phone: null,
+        p_items,
+        p_service_mode,
+        p_notes: notesList.join('\n') || null,
+      });
+      if (error) throw new Error(error.message);
+      const newOrderId = (data as { order_id?: string } | null)?.order_id;
+      if (!newOrderId) throw new Error('Order created but no id returned');
+      try {
+        localStorage.setItem(orderKey, newOrderId);
+        localStorage.removeItem(cartKey);
+      } catch {
+        /* storage unavailable */
+      }
+      setActiveOrderId(newOrderId);
+      setCartLines([]);
+      router.push(`/${slug}/order/${newOrderId}?table=${tableId}&lang=${lang}`);
+    } catch (err) {
+      setPlaceError(err instanceof Error ? err.message : String(err));
+      setPlacing(false);
+    }
   };
 
   // Dish Detail click handler
@@ -214,43 +316,40 @@ export default function DigitalMenuView({
   };
 
   // Direct Order click handler (Orders immediately, not Add to Basket)
-  const handleDirectOrder = (dish: MenuItem) => {
-    const isTakeaway = modalFulfillment === 'takeaway' || tableId === 'takeaway';
-    const randNum = Math.floor(1000 + Math.random() * 9000);
-    const fakeOrderId = `ord-${randNum}${isTakeaway ? '-takeaway' : ''}`;
-    const pickupCode = `${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const tableLabelText = isTakeaway
-      ? (modalPhone.trim() ? `Takeaway (${modalPhone.trim()})` : 'Takeaway Order')
-      : tableDisplay;
-
-    addTicketToStorage({
-      id: `tkt-${Date.now().toString().slice(-6)}`,
-      order_id: fakeOrderId,
-      station: dish.station,
-      table_label: tableLabelText,
-      items: [
-        {
-          name: tI18n(dish.name_i18n, 'en'),
-          quantity: modalQty,
-          notes: modalInstructions.trim() || undefined,
-        },
-      ],
-      status: 'queue',
-      pickup_code: pickupCode,
-      notes: isTakeaway
-        ? `TAKEAWAY / TO-GO PACKAGING${modalPhone.trim() ? ` • Phone: ${modalPhone.trim()}` : ''}`
-        : undefined,
-      created_at: new Date().toISOString(),
-      elapsed_minutes: 0,
-    });
-
-    setSelectedDish(null);
-
-    const cleanPhone = encodeURIComponent(modalPhone.trim() || '');
-    router.push(
-      `/${slug}/order/${fakeOrderId}?table=${isTakeaway ? 'takeaway' : tableId}&lang=${lang}&item=${dish.id}&qty=${modalQty}&fulfillment=${isTakeaway ? 'takeaway' : 'dine-in'}&phone=${cleanPhone}`
-    );
+  const handleDirectOrder = async (dish: MenuItem) => {
+    if (placing) return;
+    setPlacing(true);
+    setPlaceError(null);
+    try {
+      await ensureDinerSession();
+      const isTakeawayOrder = modalFulfillment === 'takeaway' || tableId === 'takeaway';
+      if (!isTakeawayOrder && !tables[0]?.id) throw new Error('No table available for dine-in');
+      const { data, error } = await supabaseBrowser().rpc('create_order', {
+        p_fulfillment: isTakeawayOrder ? 'takeaway' : 'dine_in',
+        p_table_id: isTakeawayOrder ? null : (tables[0]?.id ?? null),
+        p_phone: modalPhone.trim() || null,
+        p_items: [{ menu_item_id: dish.id, quantity: modalQty }],
+        p_service_mode: 'not_applicable',
+        p_notes: modalInstructions.trim() || null,
+      });
+      if (error) throw new Error(error.message);
+      const newOrderId = (data as { order_id?: string } | null)?.order_id;
+      if (!newOrderId) throw new Error('Order created but no id returned');
+      try {
+        localStorage.setItem(orderKey, newOrderId);
+      } catch {
+        /* storage unavailable */
+      }
+      setActiveOrderId(newOrderId);
+      setSelectedDish(null);
+      const cleanPhone = encodeURIComponent(modalPhone.trim() || '');
+      router.push(
+        `/${slug}/order/${newOrderId}?table=${isTakeawayOrder ? 'takeaway' : tableId}&lang=${lang}&phone=${cleanPhone}`,
+      );
+    } catch (err) {
+      setPlaceError(err instanceof Error ? err.message : String(err));
+      setPlacing(false);
+    }
   };
 
   // Like click handler
@@ -290,8 +389,8 @@ export default function DigitalMenuView({
     <div
       className={`min-h-screen transition-colors duration-300 font-sans selection:bg-amber-400 selection:text-black ${
         isDarkMode
-          ? 'bg-[#150c07] text-[#f5ebd9]'
-          : 'bg-[#F5ECD7] text-[#2B1810]'
+          ? 'app-bg-dark text-[#f5ebd9]'
+          : 'app-bg-light text-[#2B1810]'
       }`}
     >
       {/* Toast Notification */}
@@ -308,18 +407,18 @@ export default function DigitalMenuView({
       <header
         className={`sticky top-0 z-30 transition-colors duration-300 backdrop-blur-xl border-b py-3 px-4 sm:px-8 ${
           isDarkMode
-            ? 'bg-[#1e110a]/90 border-[#382015] shadow-lg shadow-black/40'
+            ? 'bg-[#3A241A]/90 border-[#382015] shadow-lg shadow-black/40'
             : 'bg-[#FAF5EC]/95 border-[#D4B896] shadow-sm shadow-amber-900/10'
         }`}
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-[#FAF7F2] flex items-center justify-center shadow-md overflow-hidden border border-[#2B1810]/20 shrink-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-[#FAF7F2] flex items-center justify-center shadow-md overflow-hidden border border-[#2B1810]/20 shrink-0 p-1">
               <img
                 src="/skill-coffee-icon.png"
                 alt="Skill Coffee"
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
               />
             </div>
             <div>
@@ -327,7 +426,7 @@ export default function DigitalMenuView({
                 Skill Coffee
               </h1>
               <p className="text-[10px] sm:text-xs text-stone-500 dark:text-[#bda490] font-medium hidden sm:block">
-                Meskel House Addis Ababa · Specialty Roasters & Fine Dining
+                Specialty Roasters & Fine Dining
               </p>
             </div>
           </div>
@@ -341,7 +440,7 @@ export default function DigitalMenuView({
               aria-label="Toggle Dark Mode"
               className={`p-2 sm:px-3 sm:py-1.5 rounded-full border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 isDarkMode
-                  ? 'bg-[#2b1810] border-[#4a2b1c] text-amber-300 hover:bg-[#3a2115]'
+                  ? 'bg-[#2b1810] border-[#4a2b1c] text-amber-300 hover:bg-[#3A241A]'
                   : 'bg-stone-100 border-stone-200 text-neutral-700 hover:bg-stone-200'
               }`}
             >
@@ -367,11 +466,14 @@ export default function DigitalMenuView({
               onClick={() => setIsDrawerOpen(true)}
               className={`relative p-2 sm:px-3 sm:py-1.5 rounded-full border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 isDarkMode
-                  ? 'bg-[#2b1810] border-[#4a2b1c] text-white hover:bg-[#3a2115]'
+                  ? 'bg-[#2b1810] border-[#4a2b1c] text-white hover:bg-[#3A241A]'
                   : 'bg-[#2B1810] text-white border-transparent hover:bg-[#3D2415]'
               }`}
             >
               <ShoppingBag size={15} className="text-amber-400" />
+              {activeOrderId && totalCartCount === 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#2b1810]" />
+              )}
               <span className="hidden sm:inline">Order</span>
               {totalCartCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-stone-950 text-[10px] font-extrabold ml-0.5">
@@ -385,6 +487,45 @@ export default function DigitalMenuView({
 
       {/* MAIN CONTAINER */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-28 space-y-10">
+        {/* ACTIVE ORDER TRACKER BANNER */}
+        {activeOrderId && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-950/40 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                <UtensilsCrossed size={18} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-emerald-200">You have an active order</p>
+                <p className="text-xs text-emerald-300/70">Track its live kitchen status anytime.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => router.push(`/${slug}/order/${activeOrderId}?table=${tableId}&lang=${lang}`)}
+                className="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all cursor-pointer"
+              >
+                Track My Order
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    localStorage.removeItem(orderKey);
+                  } catch {
+                    /* ignore */
+                  }
+                  setActiveOrderId(null);
+                }}
+                className="px-3 py-2 rounded-xl border border-emerald-500/30 text-emerald-300/80 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+                title="Dismiss"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ========================================================= */}
         {/* HERO SECTION (Requested in Photo 1) */}
         {/* ========================================================= */}
@@ -446,7 +587,7 @@ export default function DigitalMenuView({
         <section
           className={`relative overflow-hidden rounded-3xl p-6 sm:p-8 border transition-all ${
             isDarkMode
-              ? 'bg-gradient-to-r from-[#29170e] via-[#3d2315] to-[#1c0f08] border-[#4a2a19] shadow-xl'
+              ? 'bg-gradient-to-r from-[#29170e] via-[#3d2315] to-[#3A241A] border-[#4a2a19] shadow-xl'
               : 'bg-gradient-to-r from-[#C8956C]/30 via-[#D4A574]/20 to-[#C8956C]/30 border-[#D4B896] shadow-sm'
           }`}
         >
@@ -495,7 +636,7 @@ export default function DigitalMenuView({
                 onClick={() => openDishDetail(item)}
                 className={`group relative overflow-hidden rounded-2xl cursor-pointer transition-all duration-300 hover:scale-[1.02] border ${
                   isDarkMode
-                    ? 'bg-[#26150d] border-[#442618] shadow-md shadow-black/40 hover:border-amber-500/50'
+                    ? 'bg-[#3A241A] border-[#442618] shadow-md shadow-black/40 hover:border-amber-500/50'
                     : 'bg-[#FAF5EC] border-[#D4B896] shadow-sm hover:shadow-md hover:border-amber-600/40'
                 }`}
               >
@@ -537,7 +678,7 @@ export default function DigitalMenuView({
                 onClick={() => openDishDetail(item)}
                 className={`group relative overflow-hidden rounded-3xl p-3 flex flex-col justify-between cursor-pointer transition-all duration-300 hover:scale-[1.02] border ${
                   isDarkMode
-                    ? 'bg-[#24130b] border-[#442417] shadow-lg shadow-black/40 hover:border-amber-500/50'
+                    ? 'bg-[#3A241A] border-[#442417] shadow-lg shadow-black/40 hover:border-amber-500/50'
                     : 'bg-[#FAF5EC] border-[#D4B896] shadow-sm hover:shadow-md hover:border-amber-600/40'
                 }`}
               >
@@ -575,7 +716,7 @@ export default function DigitalMenuView({
 
                 {/* Price and Buy Now Pill Button (From Photo 2) */}
                 <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-stone-100 dark:border-stone-800/80">
-                  <span className="px-2 py-1 rounded-lg bg-stone-100 dark:bg-[#1a0e08] text-[10px] sm:text-xs font-bold text-stone-800 dark:text-stone-300 border border-stone-200 dark:border-stone-800">
+                  <span className="px-2 py-1 rounded-lg bg-stone-100 dark:bg-[#3A241A] text-[10px] sm:text-xs font-bold text-stone-800 dark:text-stone-300 border border-stone-200 dark:border-stone-800">
                     {item.price} ETB
                   </span>
 
@@ -625,7 +766,7 @@ export default function DigitalMenuView({
                     selectedDietary === tag
                       ? 'bg-amber-500 text-stone-950 border-amber-400 shadow-sm'
                       : isDarkMode
-                      ? 'bg-[#26150d] text-stone-300 border-[#442618] hover:bg-[#331c11]'
+                      ? 'bg-[#3A241A] text-stone-300 border-[#442618] hover:bg-[#3A241A]'
                       : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-50'
                   }`}
                 >
@@ -648,7 +789,7 @@ export default function DigitalMenuView({
               onChange={(e) => setSearchQuery(e.target.value)}
               className={`w-full pl-11 pr-10 py-3 rounded-2xl text-xs sm:text-sm focus:outline-none transition-all shadow-sm border ${
                 isDarkMode
-                  ? 'bg-[#26150d] border-[#442618] text-white placeholder-stone-500 focus:border-amber-500'
+                  ? 'bg-[#3A241A] border-[#442618] text-white placeholder-stone-500 focus:border-amber-500'
                   : 'bg-white border-stone-200 text-neutral-900 placeholder-stone-400 focus:border-[#2B1810]'
               }`}
             />
@@ -662,6 +803,12 @@ export default function DigitalMenuView({
             )}
           </div>
 
+          {catalogError && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-3 text-xs">
+              Failed to load the menu from the server: {catalogError}
+            </div>
+          )}
+
           {/* Category Chips Bar */}
           <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
             <button
@@ -673,7 +820,7 @@ export default function DigitalMenuView({
                     ? 'bg-amber-500 text-stone-950 shadow-md font-extrabold'
                     : 'bg-[#2B1810] text-white shadow-md'
                   : isDarkMode
-                  ? 'bg-[#26150d] border border-[#442618] text-stone-300 hover:bg-[#351e13]'
+                  ? 'bg-[#3A241A] border border-[#442618] text-stone-300 hover:bg-[#3A241A]'
                   : 'bg-white border border-stone-200 text-neutral-700 hover:bg-stone-50'
               }`}
             >
@@ -695,7 +842,7 @@ export default function DigitalMenuView({
                         ? 'bg-amber-500 text-stone-950 shadow-md font-extrabold'
                         : 'bg-[#2B1810] text-white shadow-md'
                       : isDarkMode
-                      ? 'bg-[#26150d] border border-[#442618] text-stone-300 hover:bg-[#351e13]'
+                      ? 'bg-[#3A241A] border border-[#442618] text-stone-300 hover:bg-[#3A241A]'
                       : 'bg-white border border-stone-200 text-neutral-700 hover:bg-stone-50'
                   }`}
                 >
@@ -723,7 +870,7 @@ export default function DigitalMenuView({
             <div
               className={`text-center py-20 p-6 rounded-3xl border ${
                 isDarkMode
-                  ? 'bg-[#24130b] border-[#442417] text-stone-400'
+                  ? 'bg-[#3A241A] border-[#442417] text-stone-400'
                   : 'bg-white border-stone-200 text-neutral-500'
               }`}
             >
@@ -747,7 +894,7 @@ export default function DigitalMenuView({
                     onClick={() => openDishDetail(dish)}
                     className={`group rounded-3xl overflow-hidden border cursor-pointer transition-all duration-300 hover:shadow-xl hover:scale-[1.01] flex flex-col justify-between ${
                       isDarkMode
-                        ? 'bg-[#24130b] border-[#442417] shadow-lg shadow-black/30 hover:border-amber-500/50'
+                        ? 'bg-[#3A241A] border-[#442417] shadow-lg shadow-black/30 hover:border-amber-500/50'
                         : 'bg-[#FAF5EC] border-[#D4B896] shadow-sm hover:shadow-lg hover:border-amber-600/50'
                     }`}
                   >
@@ -869,7 +1016,7 @@ export default function DigitalMenuView({
           <div
             className={`relative w-full sm:max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl z-10 animate-scale-up border overflow-y-auto max-h-[92vh] hide-scrollbar ${
               isDarkMode
-                ? 'bg-[#1e1009] border-[#442417] text-[#f7e6d2]'
+                ? 'bg-[#3A241A] border-[#442417] text-[#f7e6d2]'
                 : 'bg-white border-stone-200 text-[#2B1810]'
             }`}
           >
@@ -927,7 +1074,7 @@ export default function DigitalMenuView({
               <div
                 className={`grid grid-cols-3 gap-2 p-3 rounded-2xl text-center text-xs font-semibold ${
                   isDarkMode
-                    ? 'bg-[#29160d] border border-[#3d2114]'
+                    ? 'bg-[#3A241A] border border-[#3d2114]'
                     : 'bg-stone-50 border border-stone-200'
                 }`}
               >
@@ -984,7 +1131,7 @@ export default function DigitalMenuView({
                         key={idx}
                         className={`px-3 py-1 rounded-full text-xs font-medium border ${
                           isDarkMode
-                            ? 'bg-[#29160d] text-amber-200 border-[#4a2b1b]'
+                            ? 'bg-[#3A241A] text-amber-200 border-[#4a2b1b]'
                             : 'bg-stone-100 text-neutral-800 border-stone-200'
                         }`}
                       >
@@ -1017,7 +1164,7 @@ export default function DigitalMenuView({
                   onChange={(e) => setModalInstructions(e.target.value)}
                   className={`w-full p-3 rounded-2xl text-xs sm:text-sm border focus:outline-none transition-all ${
                     isDarkMode
-                      ? 'bg-[#29160d] border-[#442417] text-white placeholder-stone-500 focus:border-amber-500'
+                      ? 'bg-[#3A241A] border-[#442417] text-white placeholder-stone-500 focus:border-amber-500'
                       : 'bg-stone-50 border-stone-200 text-neutral-900 placeholder-stone-400 focus:border-[#2B1810]'
                   }`}
                 />
@@ -1028,7 +1175,7 @@ export default function DigitalMenuView({
                 <label className="block text-xs font-extrabold uppercase tracking-wider text-stone-400">
                   {lang === 'am' ? 'አገልግሎት ዓይነት' : 'Order Type'}
                 </label>
-                <div className={`grid grid-cols-2 gap-1.5 p-1 rounded-2xl border ${isDarkMode ? 'bg-[#29160d] border-[#3d2114]' : 'bg-stone-100 border-stone-200'}`}>
+                <div className={`grid grid-cols-2 gap-1.5 p-1 rounded-2xl border ${isDarkMode ? 'bg-[#3A241A] border-[#3d2114]' : 'bg-stone-100 border-stone-200'}`}>
                   <button
                     type="button"
                     onClick={() => setModalFulfillment('dine-in')}
@@ -1060,7 +1207,7 @@ export default function DigitalMenuView({
                     placeholder={lang === 'am' ? 'የስልክ ቁጥር (ለምሳሌ፡ 0911 234 567)' : 'Phone for pickup SMS (e.g. 0911 234 567)'}
                     value={modalPhone}
                     onChange={(e) => setModalPhone(e.target.value)}
-                    className={`w-full px-3 py-2.5 rounded-xl text-xs border focus:outline-none focus:border-amber-500 transition-colors ${isDarkMode ? 'bg-[#1C1109] border-stone-700 text-stone-100 placeholder:text-stone-500' : 'bg-white border-stone-200 text-stone-900 placeholder:text-stone-400'}`}
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs border focus:outline-none focus:border-amber-500 transition-colors ${isDarkMode ? 'bg-[#3A241A] border-stone-700 text-stone-100 placeholder:text-stone-500' : 'bg-white border-stone-200 text-stone-900 placeholder:text-stone-400'}`}
                   />
                 )}
               </div>
@@ -1074,7 +1221,7 @@ export default function DigitalMenuView({
                     userLikedItems[selectedDish.id]
                       ? 'bg-rose-500/10 text-rose-500 border-rose-500/30'
                       : isDarkMode
-                      ? 'bg-[#29160d] text-stone-300 border-[#3d2114]'
+                      ? 'bg-[#3A241A] text-stone-300 border-[#3d2114]'
                       : 'bg-stone-100 text-stone-700 border-stone-200'
                   }`}
                 >
@@ -1099,7 +1246,7 @@ export default function DigitalMenuView({
             <div
               className={`sticky bottom-0 p-4 sm:p-5 border-t flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 ${
                 isDarkMode
-                  ? 'bg-[#1e1009] border-[#381c10]'
+                  ? 'bg-[#3A241A] border-[#381c10]'
                   : 'bg-white border-stone-200'
               }`}
             >
@@ -1108,7 +1255,7 @@ export default function DigitalMenuView({
                 <span className="text-xs font-bold text-stone-500 dark:text-stone-400">
                   {lang === 'am' ? 'ብዛት' : 'Qty'}:
                 </span>
-                <div className={`flex items-center rounded-full p-1 border shrink-0 ${isDarkMode ? 'bg-[#29160d] border-[#442417]' : 'bg-stone-100 border-stone-200'}`}>
+                <div className={`flex items-center rounded-full p-1 border shrink-0 ${isDarkMode ? 'bg-[#3A241A] border-[#442417]' : 'bg-stone-100 border-stone-200'}`}>
                   <button
                     type="button"
                     onClick={() => setModalQty((prev) => Math.max(1, prev - 1))}
@@ -1159,7 +1306,7 @@ export default function DigitalMenuView({
           <div
             className={`relative w-full max-w-md rounded-3xl p-6 sm:p-7 shadow-2xl z-10 animate-scale-up border ${
               isDarkMode
-                ? 'bg-[#1c0f08] border-[#442417] text-[#f7e6d2]'
+                ? 'bg-[#3A241A] border-[#442417] text-[#f7e6d2]'
                 : 'bg-white border-stone-200 text-[#2B1810]'
             }`}
           >
@@ -1188,7 +1335,7 @@ export default function DigitalMenuView({
                   Reservation Confirmed!
                 </h5>
                 <p className="text-xs text-stone-400 max-w-xs leading-relaxed">
-                  We look forward to welcoming you at Meskel House & Skill Coffee. A confirmation SMS will be sent.
+                  We look forward to welcoming you at Skill Coffee. A confirmation SMS will be sent.
                 </p>
               </div>
             ) : (
@@ -1205,7 +1352,7 @@ export default function DigitalMenuView({
                     onChange={(e) => setReserveName(e.target.value)}
                     className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none ${
                       isDarkMode
-                        ? 'bg-[#26150d] border-[#442417] text-white focus:border-amber-500'
+                        ? 'bg-[#3A241A] border-[#442417] text-white focus:border-amber-500'
                         : 'bg-stone-50 border-stone-200 text-neutral-900 focus:border-[#2B1810]'
                     }`}
                   />
@@ -1223,7 +1370,7 @@ export default function DigitalMenuView({
                     onChange={(e) => setReservePhone(e.target.value)}
                     className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none ${
                       isDarkMode
-                        ? 'bg-[#26150d] border-[#442417] text-white focus:border-amber-500'
+                        ? 'bg-[#3A241A] border-[#442417] text-white focus:border-amber-500'
                         : 'bg-stone-50 border-stone-200 text-neutral-900 focus:border-[#2B1810]'
                     }`}
                   />
@@ -1239,7 +1386,7 @@ export default function DigitalMenuView({
                       onChange={(e) => setReserveGuests(e.target.value)}
                       className={`w-full text-xs px-2.5 py-2.5 rounded-xl border focus:outline-none ${
                         isDarkMode
-                          ? 'bg-[#26150d] border-[#442417] text-white'
+                          ? 'bg-[#3A241A] border-[#442417] text-white'
                           : 'bg-stone-50 border-stone-200 text-neutral-900'
                       }`}
                     >
@@ -1262,7 +1409,7 @@ export default function DigitalMenuView({
                       onChange={(e) => setReserveDate(e.target.value)}
                       className={`w-full text-xs px-2.5 py-2.5 rounded-xl border focus:outline-none ${
                         isDarkMode
-                          ? 'bg-[#26150d] border-[#442417] text-white'
+                          ? 'bg-[#3A241A] border-[#442417] text-white'
                           : 'bg-stone-50 border-stone-200 text-neutral-900'
                       }`}
                     />
@@ -1279,7 +1426,7 @@ export default function DigitalMenuView({
                       onChange={(e) => setReserveTime(e.target.value)}
                       className={`w-full text-xs px-2 py-2.5 rounded-xl border focus:outline-none ${
                         isDarkMode
-                          ? 'bg-[#26150d] border-[#442417] text-white'
+                          ? 'bg-[#3A241A] border-[#442417] text-white'
                           : 'bg-stone-50 border-stone-200 text-neutral-900'
                       }`}
                     />
@@ -1297,7 +1444,7 @@ export default function DigitalMenuView({
                     onChange={(e) => setReserveNotes(e.target.value)}
                     className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none ${
                       isDarkMode
-                        ? 'bg-[#26150d] border-[#442417] text-white focus:border-amber-500'
+                        ? 'bg-[#3A241A] border-[#442417] text-white focus:border-amber-500'
                         : 'bg-stone-50 border-stone-200 text-neutral-900 focus:border-[#2B1810]'
                     }`}
                   />
@@ -1338,7 +1485,7 @@ export default function DigitalMenuView({
             onClick={() => setIsDrawerOpen(true)}
             className={`w-full p-4 rounded-3xl shadow-2xl flex items-center justify-between cursor-pointer transition-all duration-200 border active:scale-98 ${
               isDarkMode
-                ? 'bg-[#29160d] text-white border-amber-500/40 shadow-black/80'
+                ? 'bg-[#3A241A] text-white border-amber-500/40 shadow-black/80'
                 : 'bg-[#2B1810] text-white border-stone-700'
             }`}
           >
@@ -1377,7 +1524,7 @@ export default function DigitalMenuView({
           <div
             className={`relative max-w-md w-full h-full flex flex-col justify-between z-10 shadow-2xl animate-slide-left border-l ${
               isDarkMode
-                ? 'bg-[#180e08] border-[#381c10] text-[#f7e6d2]'
+                ? 'bg-[#3A241A] border-[#381c10] text-[#f7e6d2]'
                 : 'bg-white border-stone-200 text-neutral-900'
             }`}
           >
@@ -1406,6 +1553,30 @@ export default function DigitalMenuView({
 
             {/* Drawer Content */}
             <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {/* Active order tracker (always reachable from the cart icon) */}
+              {activeOrderId && (
+                <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/40 p-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                      <UtensilsCrossed size={18} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-emerald-200">You have an active order</p>
+                      <p className="text-xs text-emerald-300/70 truncate">Track its live kitchen status.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(`/${slug}/order/${activeOrderId}?table=${tableId}&lang=${lang}`)
+                    }
+                    className="shrink-0 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Track My Order
+                  </button>
+                </div>
+              )}
+
               <Cart
                 lines={cartLines}
                 menuItems={MENU}
@@ -1427,23 +1598,26 @@ export default function DigitalMenuView({
             <div
               className={`p-5 border-t space-y-3 ${
                 isDarkMode
-                  ? 'bg-[#120804] border-[#381c10]'
+                  ? 'bg-[#3A241A] border-[#381c10]'
                   : 'bg-[#EDE0C8] border-[#D4B896]'
               }`}
             >
               <button
                 type="button"
-                disabled={cartLines.length === 0}
+                disabled={cartLines.length === 0 || placing}
                 onClick={handlePlaceOrder}
                 className={`w-full py-4 rounded-2xl text-xs sm:text-sm font-bold uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer ${
-                  cartLines.length === 0
+                  cartLines.length === 0 || placing
                     ? 'bg-stone-300 text-neutral-500 cursor-not-allowed'
                     : 'bg-amber-500 hover:bg-amber-400 text-stone-950 active:scale-98'
                 }`}
               >
-                <span>Place Order & Proceed to Pay</span>
-                <ArrowRight size={16} />
+                <span>{placing ? 'Placing Order…' : 'Place Order & Proceed to Pay'}</span>
+                {!placing && <ArrowRight size={16} />}
               </button>
+              {placeError && (
+                <p className="text-[11px] text-rose-600 text-center">{placeError}</p>
+              )}
             </div>
           </div>
         </div>
@@ -1452,13 +1626,7 @@ export default function DigitalMenuView({
       {/* ========================================================= */}
       {/* COFFEEHOUSE FOOTER (From Photo 2) */}
       {/* ========================================================= */}
-      <footer
-        className={`mt-20 border-t ${
-          isDarkMode
-            ? 'bg-[#0f0704] text-[#cfb7a5] border-[#291309]'
-            : 'bg-[#2B1810] text-[#E8DFD8] border-[#3D2415]'
-        }`}
-      >
+      <footer className="mt-20 border-t bg-[#3A241A] text-[#E8DFD8] border-[#3D2415]">
         <div className="max-w-7xl mx-auto px-6 sm:px-8 py-12 space-y-10">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             {/* Products Column */}
@@ -1497,7 +1665,7 @@ export default function DigitalMenuView({
                 Company Info
               </h5>
               <ul className="text-xs space-y-2 opacity-80">
-                <li>About Meskel House</li>
+                <li>About Skill Coffee</li>
                 <li>Skill Coffee Roastery</li>
                 <li>Table Reservations</li>
                 <li>Contact & Location</li>
@@ -1546,7 +1714,7 @@ export default function DigitalMenuView({
           </div>
 
           <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row items-center justify-between text-[11px] opacity-70 gap-2">
-            <p>© 2026 Meskel House & Skill Coffee · Addis Ababa, Ethiopia.</p>
+            <p>© 2026 Skill Coffee · Addis Ababa, Ethiopia.</p>
             <div className="flex items-center gap-4">
               <span>Privacy Policy</span>
               <span>•</span>

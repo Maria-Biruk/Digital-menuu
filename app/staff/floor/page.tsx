@@ -1,9 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import StaffHeader from "@/components/StaffHeader";
 import WaiterFloorView from "@/components/WaiterFloorView";
-import { INITIAL_TICKETS, INITIAL_CALL_ALERTS, TABLES } from "@/lib/mock";
+import {
+  fetchFloorTickets,
+  subscribeTickets,
+  markOrderServed,
+  fetchWaiterCalls,
+  subscribeWaiterCalls,
+  resolveWaiterCall,
+  fetchTableActivity,
+  type TableActivity,
+} from "@/lib/db";
 import { Ticket, CallWaiterAlert } from "@/lib/types";
 import {
   UserCheck,
@@ -25,33 +34,78 @@ export default function WaiterFloorPage() {
   );
 }
 
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
 function WaiterFloorContent() {
-  const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
-  const [callAlerts, setCallAlerts] = useState<CallWaiterAlert[]>(INITIAL_CALL_ALERTS);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [callAlerts, setCallAlerts] = useState<CallWaiterAlert[]>([]);
+  const [browsingTables, setBrowsingTables] = useState<TableActivity[]>([]);
 
-  // Mock tables actively browsing menu
-  const [browsingTables, setBrowsingTables] = useState([
-    { tableLabel: "Table 2", viewing: "Ethiopian Food", activeSince: "3m ago", itemsInCart: 2 },
-    { tableLabel: "Table 7", viewing: "Cocktails & Drinks", activeSince: "1m ago", itemsInCart: 0 },
-    { tableLabel: "Table 9", viewing: "Desserts & Coffee", activeSince: "Just now", itemsInCart: 1 },
-  ]);
+  const loadTickets = useCallback(async () => {
+    try {
+      setTickets(await fetchFloorTickets());
+    } catch (err) {
+      console.error("Failed to load tickets", err);
+    }
+  }, []);
 
-  const handleMarkServed = (ticketId: string) => {
-    // TODO: Supabase wiring - update ticket to 'served' and notify order status
-    // await supabase.from('tickets').update({ status: 'served', served_at: new Date().toISOString() }).eq('id', ticketId);
-    setTickets((prev) =>
-      prev.map((t) => (t.id === ticketId ? { ...t, status: "served" } : t))
-    );
+  const loadCalls = useCallback(async () => {
+    try {
+      setCallAlerts(await fetchWaiterCalls());
+    } catch (err) {
+      console.error("Failed to load waiter calls", err);
+    }
+  }, []);
+
+  const loadActivity = useCallback(async () => {
+    try {
+      setBrowsingTables(await fetchTableActivity());
+    } catch (err) {
+      console.error("Failed to load table activity", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTickets();
+    void loadCalls();
+    void loadActivity();
+    const unsubTickets = subscribeTickets(() => void loadTickets(), "floor-tickets");
+    const unsubCalls = subscribeWaiterCalls(() => void loadCalls());
+    return () => {
+      unsubTickets();
+      unsubCalls();
+    };
+  }, [loadTickets, loadCalls, loadActivity]);
+
+  const handleMarkServed = async (orderId: string, code: string) => {
+    try {
+      await markOrderServed(orderId, code);
+      await loadTickets();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to mark order served");
+    }
   };
 
-  const handleAcknowledgeAlert = (alertId: string) => {
-    // TODO: Supabase wiring - mark waiter call as acknowledged
-    // await supabase.from('waiter_calls').update({ status: 'acknowledged' }).eq('id', alertId);
-    setCallAlerts((prev) => prev.filter((a) => a.id !== alertId));
+  const handleAcknowledgeAlert = async (alertId: string) => {
+    try {
+      await resolveWaiterCall(alertId, "acknowledged");
+      await loadCalls();
+    } catch (err) {
+      console.error("Failed to acknowledge waiter call", err);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-[#120B07] text-stone-100 font-sans pb-16">
+    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
       <StaffHeader
         title="Floor Service Console"
         subtitle="Dining Room & Delivery"
@@ -63,7 +117,7 @@ function WaiterFloorContent() {
         {/* Top Split: Active Waiter Calls & Live Browsing Presence */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Section: Call Waiter Alerts */}
-          <div className="bg-[#1C1109] border border-amber-900/40 rounded-2xl p-5 shadow-lg space-y-4">
+          <div className="bg-[#3A241A] border border-amber-900/40 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex items-center justify-between border-b border-[#2B1810] pb-3">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
@@ -84,7 +138,7 @@ function WaiterFloorContent() {
             </div>
 
             {callAlerts.length === 0 ? (
-              <div className="p-8 text-center rounded-xl bg-[#120B07] border border-stone-800 text-stone-500 text-xs">
+              <div className="p-8 text-center rounded-xl bg-[#38210F] border border-stone-800 text-stone-500 text-xs">
                 <CheckCheck className="w-6 h-6 mx-auto mb-2 text-emerald-500" />
                 No pending waiter calls. All tables attended!
               </div>
@@ -93,7 +147,7 @@ function WaiterFloorContent() {
                 {callAlerts.map((alert) => (
                   <div
                     key={alert.id}
-                    className="p-4 rounded-xl bg-[#120B07] border border-amber-600/30 flex items-center justify-between gap-3 shadow-md"
+                    className="p-4 rounded-xl bg-[#38210F] border border-amber-600/30 flex items-center justify-between gap-3 shadow-md"
                   >
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-[#2B1810] text-amber-300 font-serif font-bold flex items-center justify-center text-sm border border-[#3D2415]">
@@ -130,7 +184,7 @@ function WaiterFloorContent() {
           </div>
 
           {/* Section: Tables Viewing Menu But Not Ordered Yet */}
-          <div className="bg-[#1C1109] border border-[#2B1810] rounded-2xl p-5 shadow-lg space-y-4">
+          <div className="bg-[#3A241A] border border-[#2B1810] rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex items-center justify-between border-b border-[#2B1810] pb-3">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-cyan-950 text-cyan-400 flex items-center justify-center border border-cyan-800">
@@ -151,41 +205,34 @@ function WaiterFloorContent() {
             </div>
 
             <div className="space-y-3">
-              {browsingTables.map((session, idx) => (
-                <div
-                  key={idx}
-                  className="p-3.5 rounded-xl bg-[#120B07] border border-stone-800 flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-stone-900 text-stone-200 flex items-center justify-center">
-                      <Smartphone className="w-4 h-4 text-cyan-400" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-white">
-                        {session.tableLabel}
-                      </p>
-                      <p className="text-[11px] text-stone-400">
-                        Viewing <span className="text-stone-200 font-medium">{session.viewing}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="text-right">
-                    <span className="text-[10px] text-stone-500 block">
-                      {session.activeSince}
-                    </span>
-                    {session.itemsInCart > 0 ? (
-                      <span className="text-[10px] font-bold text-amber-400">
-                        {session.itemsInCart} items in draft cart
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-stone-500">
-                        Browsing catalog
-                      </span>
-                    )}
-                  </div>
+              {browsingTables.length === 0 ? (
+                <div className="p-8 text-center rounded-2xl bg-[#38210F] border border-stone-800 text-stone-500 text-xs">
+                  No tables have opened the menu recently.
                 </div>
-              ))}
+              ) : (
+                browsingTables.map((session, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3.5 rounded-xl bg-[#38210F] border border-stone-800 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-stone-900 text-stone-200 flex items-center justify-center">
+                        <Smartphone className="w-4 h-4 text-cyan-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-white">{session.tableLabel}</p>
+                        <p className="text-[11px] text-stone-400">Opened the menu</p>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[10px] text-stone-500 block">
+                        {timeAgo(session.viewedAt)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

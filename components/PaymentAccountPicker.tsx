@@ -67,7 +67,7 @@ export default function PaymentAccountPicker({
               className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                 isSelected
                   ? 'bg-[#2B1810]/5 dark:bg-[#2B1810]/30 border-[#2B1810] shadow-md ring-1 ring-[#2B1810]'
-                  : 'bg-white dark:bg-[#1C1109] border-neutral-200 dark:border-stone-800 hover:border-neutral-300 dark:hover:border-stone-700'
+                  : 'bg-white dark:bg-[#3A241A] border-neutral-200 dark:border-stone-800 hover:border-neutral-300 dark:hover:border-stone-700'
               }`}
             >
               <div className="flex items-center gap-3 min-w-0 flex-1">

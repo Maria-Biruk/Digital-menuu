@@ -38,7 +38,7 @@ export default function LanguageSwitcher({
       type="button"
       onClick={handleCycle}
       aria-label="Toggle language"
-      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-neutral-200 dark:border-stone-800 bg-white/90 dark:bg-[#1C1109]/90 text-[#2B1810] dark:text-amber-300 text-xs font-bold tracking-wider shadow-sm hover:bg-neutral-50 dark:hover:bg-[#2B1810] transition-all cursor-pointer backdrop-blur-md active:scale-95 ${className}`}
+      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-neutral-200 dark:border-stone-800 bg-white/90 dark:bg-[#3A241A]/90 text-[#2B1810] dark:text-amber-300 text-xs font-bold tracking-wider shadow-sm hover:bg-neutral-50 dark:hover:bg-[#2B1810] transition-all cursor-pointer backdrop-blur-md active:scale-95 ${className}`}
     >
       <Globe size={14} className="text-amber-600 dark:text-amber-400 shrink-0" />
       <span>{currentLang.toUpperCase()}</span>

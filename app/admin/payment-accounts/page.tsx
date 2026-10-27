@@ -2,7 +2,12 @@
 
 import React, { useState, useEffect } from "react";
 import AdminHeader from "@/components/AdminHeader";
-import { PAYMENT_ACCOUNTS } from "@/lib/mock";
+import {
+  fetchPaymentAccounts,
+  savePaymentAccount,
+  setPaymentAccountActive,
+  deletePaymentAccount,
+} from "@/lib/db";
 import { PaymentAccount } from "@/lib/types";
 import {
   CreditCard,
@@ -23,22 +28,33 @@ import { getRoleInfo } from "@/lib/permissions";
 
 export default function AdminPaymentAccountsPage() {
   return (
-    <RoleGuard allowedRoles={["super_admin", "owner", "admin"]} pageTitle="Payment Accounts">
+    <RoleGuard allowedRoles={["super_admin", "owner"]} pageTitle="Payment Accounts">
       <AdminPaymentAccountsContent />
     </RoleGuard>
   );
 }
 
 function AdminPaymentAccountsContent() {
-  const [accounts, setAccounts] = useState<PaymentAccount[]>(PAYMENT_ACCOUNTS);
+  const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<PaymentAccount | null>(null);
   const [role, setRole] = useState<string | null>(null);
+
+  const loadAccounts = async () => {
+    try {
+      const rows = await fetchPaymentAccounts(true);
+      setAccounts(rows);
+    } catch (err) {
+      showNotification(err instanceof Error ? err.message : "Failed to load accounts");
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       setRole(localStorage.getItem("staff_role"));
     }
+    void loadAccounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const roleInfo = getRoleInfo(role);
@@ -80,30 +96,35 @@ function AdminPaymentAccountsContent() {
     setModalOpen(true);
   };
 
-  const handleToggleActive = (id: string) => {
-    // TODO: Supabase wiring - update is_active in db
-    // await supabase.from('payment_accounts').update({ is_active: !curr }).eq('id', id);
-    setAccounts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, is_active: !a.is_active } : a))
-    );
-  };
-
-  const handleDelete = (id: string) => {
-    // TODO: Supabase wiring - delete account from db
-    // await supabase.from('payment_accounts').delete().eq('id', id);
-    if (confirm("Are you sure you want to remove this payment account?")) {
-      setAccounts((prev) => prev.filter((a) => a.id !== id));
-      showNotification("Account removed successfully.");
+  const handleToggleActive = async (id: string) => {
+    const curr = accounts.find((a) => a.id === id);
+    if (!curr) return;
+    const next = !curr.is_active;
+    setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, is_active: next } : a)));
+    try {
+      await setPaymentAccountActive(id, next);
+      showNotification(`${next ? "Enabled" : "Disabled"} ${curr.label}.`);
+    } catch (err) {
+      setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, is_active: !next } : a)));
+      showNotification(err instanceof Error ? err.message : "Failed to update account");
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    // TODO: Supabase wiring - insert or update account
-    // await supabase.from('payment_accounts').upsert({ ... });
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to remove this payment account?")) return;
+    try {
+      await deletePaymentAccount(id);
+      await loadAccounts();
+      showNotification("Account removed successfully.");
+    } catch (err) {
+      showNotification(err instanceof Error ? err.message : "Failed to delete account");
+    }
+  };
 
-    const newAcc: PaymentAccount = {
-      id: editingAccount ? editingAccount.id : `acc_${Date.now()}`,
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const payload: Partial<PaymentAccount> = {
       account_type: accountType,
       label,
       account_name: accountName,
@@ -112,21 +133,18 @@ function AdminPaymentAccountsContent() {
       is_active: isActive,
     };
 
-    if (editingAccount) {
-      setAccounts((prev) =>
-        prev.map((a) => (a.id === editingAccount.id ? newAcc : a))
-      );
-      showNotification(`Updated ${label}`);
-    } else {
-      setAccounts((prev) => [...prev, newAcc]);
-      showNotification(`Added ${label}`);
+    try {
+      await savePaymentAccount(payload, editingAccount ? editingAccount.id : undefined);
+      await loadAccounts();
+      showNotification(editingAccount ? `Updated ${label}` : `Added ${label}`);
+      setModalOpen(false);
+    } catch (err) {
+      showNotification(err instanceof Error ? err.message : "Failed to save account");
     }
-
-    setModalOpen(false);
   };
 
   return (
-    <div className="min-h-screen bg-[#120B07] text-stone-100 font-sans pb-16">
+    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
       <AdminHeader
         title="Payment Accounts"
         subtitle="Digital Banking & Telebirr Setup"
@@ -159,7 +177,7 @@ function AdminPaymentAccountsContent() {
         )}
 
         {/* Top Action Bar */}
-        <div className="bg-[#1C1109] border border-[#2B1810] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
+        <div className="bg-[#3A241A] border border-[#2B1810] rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-serif font-bold text-base text-white">
@@ -205,10 +223,10 @@ function AdminPaymentAccountsContent() {
         </div>
 
         {/* Accounts Table */}
-        <div className="bg-[#1C1109] border border-[#2B1810] rounded-2xl shadow-xl overflow-hidden">
+        <div className="bg-[#3A241A] border border-[#2B1810] rounded-2xl shadow-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-stone-300">
-              <thead className="bg-[#120B07] text-[11px] uppercase tracking-wider text-stone-400 border-b border-[#2B1810]">
+              <thead className="bg-[#38210F] text-[11px] uppercase tracking-wider text-stone-400 border-b border-[#2B1810]">
                 <tr>
                   <th className="py-3.5 px-4 font-semibold">Account Type</th>
                   <th className="py-3.5 px-4 font-semibold">Provider / Label</th>
@@ -269,7 +287,7 @@ function AdminPaymentAccountsContent() {
                                 showNotification(`Copied ${acc.label} account: ${accVal}`);
                               }
                             }}
-                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#120B07] hover:bg-[#2B1810] text-stone-400 hover:text-white border border-[#2B1810] transition-colors cursor-pointer"
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#38210F] hover:bg-[#2B1810] text-stone-400 hover:text-white border border-[#2B1810] transition-colors cursor-pointer"
                             title="Copy number"
                           >
                             Copy
@@ -313,21 +331,21 @@ function AdminPaymentAccountsContent() {
                             <>
                               <button
                                 onClick={() => openEditModal(acc)}
-                                className="p-2 rounded-lg bg-[#120B07] hover:bg-[#2B1810] text-stone-300 hover:text-white border border-[#2B1810] transition-colors cursor-pointer"
+                                className="p-2 rounded-lg bg-[#38210F] hover:bg-[#2B1810] text-stone-300 hover:text-white border border-[#2B1810] transition-colors cursor-pointer"
                                 title="Edit account"
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 onClick={() => handleDelete(acc.id)}
-                                className="p-2 rounded-lg bg-[#120B07] hover:bg-rose-950/60 text-stone-400 hover:text-rose-300 border border-[#2B1810] hover:border-rose-900/50 transition-colors cursor-pointer"
+                                className="p-2 rounded-lg bg-[#38210F] hover:bg-rose-950/60 text-stone-400 hover:text-rose-300 border border-[#2B1810] hover:border-rose-900/50 transition-colors cursor-pointer"
                                 title="Delete account"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#120B07] text-[10px] text-stone-500 border border-stone-800 font-medium">
+                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#38210F] text-[10px] text-stone-500 border border-stone-800 font-medium">
                               <Lock className="w-3 h-3 text-amber-500/70" /> Super Admin
                             </span>
                           )}
@@ -345,7 +363,7 @@ function AdminPaymentAccountsContent() {
       {/* Add / Edit Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="bg-[#1C1109] border border-[#2B1810] rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-5 animate-fadeIn">
+          <div className="bg-[#3A241A] border border-[#2B1810] rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-5 animate-fadeIn">
             <div className="flex items-center justify-between border-b border-[#2B1810] pb-3">
               <h3 className="font-serif font-bold text-lg text-white">
                 {editingAccount ? "Edit Payment Account" : "Add Payment Account"}
@@ -369,7 +387,7 @@ function AdminPaymentAccountsContent() {
                     className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${
                       accountType === "bank"
                         ? "bg-[#2B1810] border-amber-500/80 text-white font-bold"
-                        : "bg-[#120B07] border-[#2B1810] text-stone-400 hover:text-white"
+                        : "bg-[#38210F] border-[#2B1810] text-stone-400 hover:text-white"
                     }`}
                   >
                     <input
@@ -388,7 +406,7 @@ function AdminPaymentAccountsContent() {
                     className={`flex items-center justify-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${
                       accountType === "telebirr"
                         ? "bg-[#2B1810] border-amber-500/80 text-white font-bold"
-                        : "bg-[#120B07] border-[#2B1810] text-stone-400 hover:text-white"
+                        : "bg-[#38210F] border-[#2B1810] text-stone-400 hover:text-white"
                     }`}
                   >
                     <input
@@ -416,7 +434,7 @@ function AdminPaymentAccountsContent() {
                   placeholder="e.g. Commercial Bank of Ethiopia (CBE) or Telebirr"
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-[#120B07] border border-[#2B1810] text-sm text-white focus:outline-none focus:border-amber-500"
+                  className="w-full px-4 py-2.5 rounded-xl bg-[#38210F] border border-[#2B1810] text-sm text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
 
@@ -428,10 +446,10 @@ function AdminPaymentAccountsContent() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Meskel House Restaurant PLC"
+                  placeholder="e.g. Skill Coffee PLC"
                   value={accountName}
                   onChange={(e) => setAccountName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-[#120B07] border border-[#2B1810] text-sm text-white focus:outline-none focus:border-amber-500"
+                  className="w-full px-4 py-2.5 rounded-xl bg-[#38210F] border border-[#2B1810] text-sm text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
 
@@ -447,7 +465,7 @@ function AdminPaymentAccountsContent() {
                     placeholder="e.g. 1000123456789"
                     value={accountNumber}
                     onChange={(e) => setAccountNumber(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#120B07] border border-[#2B1810] text-sm text-white font-mono focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#38210F] border border-[#2B1810] text-sm text-white font-mono focus:outline-none focus:border-amber-500"
                   />
                 </div>
               ) : (
@@ -461,7 +479,7 @@ function AdminPaymentAccountsContent() {
                     placeholder="e.g. 0911223344"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#120B07] border border-[#2B1810] text-sm text-white font-mono focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#38210F] border border-[#2B1810] text-sm text-white font-mono focus:outline-none focus:border-amber-500"
                   />
                 </div>
               )}

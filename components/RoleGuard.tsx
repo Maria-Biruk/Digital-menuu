@@ -33,7 +33,7 @@ export default function RoleGuard({
 
   if (!mounted) {
     return (
-      <div className="min-h-screen bg-[#120B07] text-stone-100 flex items-center justify-center">
+      <div className="min-h-screen app-bg-dark text-stone-100 flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -42,8 +42,8 @@ export default function RoleGuard({
   // Not logged in at all
   if (!role) {
     return (
-      <div className="min-h-screen bg-[#120B07] text-stone-100 flex flex-col items-center justify-center p-6 font-sans">
-        <div className="max-w-md w-full p-8 rounded-3xl bg-[#1C1109] border border-[#2B1810] shadow-2xl text-center space-y-5 animate-scale-up">
+      <div className="min-h-screen app-bg-dark text-stone-100 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full p-8 rounded-3xl bg-[#3A241A] border border-[#2B1810] shadow-2xl text-center space-y-5 animate-scale-up">
           <div className="w-16 h-16 rounded-2xl bg-amber-950/60 text-amber-400 flex items-center justify-center mx-auto border border-amber-800/50 shadow-inner">
             <Lock className="w-8 h-8 text-amber-400" />
           </div>
@@ -74,8 +74,8 @@ export default function RoleGuard({
   // If requireSuperAdmin is set
   if (requireSuperAdmin && roleInfo.role !== "super_admin" && roleInfo.role !== "owner") {
     return (
-      <div className="min-h-screen bg-[#120B07] text-stone-100 flex flex-col items-center justify-center p-6 font-sans">
-        <div className="max-w-lg w-full p-8 rounded-3xl bg-[#1C1109] border border-amber-800/60 shadow-2xl text-center space-y-5">
+      <div className="min-h-screen app-bg-dark text-stone-100 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="max-w-lg w-full p-8 rounded-3xl bg-[#3A241A] border border-amber-800/60 shadow-2xl text-center space-y-5">
           <div className="w-16 h-16 rounded-2xl bg-amber-950/80 text-amber-400 flex items-center justify-center mx-auto border border-amber-700/60 shadow-inner">
             <ShieldCheck className="w-8 h-8 text-amber-400" />
           </div>
@@ -89,7 +89,7 @@ export default function RoleGuard({
             <p className="text-xs text-stone-300 leading-relaxed">
               {pageTitle} contains sensitive restaurant financial or configuration settings and is strictly reserved for the <strong className="text-amber-400">Super Admin</strong>.
             </p>
-            <div className="mt-3 p-3 rounded-xl bg-[#120B07] border border-[#2B1810] text-left text-xs space-y-1">
+            <div className="mt-3 p-3 rounded-xl bg-[#38210F] border border-[#2B1810] text-left text-xs space-y-1">
               <p className="text-stone-400 font-medium">
                 Current Role: <span className="text-white font-bold">{roleInfo.label}</span>
               </p>
@@ -127,8 +127,8 @@ export default function RoleGuard({
 
   if (!isAllowed) {
     return (
-      <div className="min-h-screen bg-[#120B07] text-stone-100 flex flex-col items-center justify-center p-6 font-sans">
-        <div className="max-w-md w-full p-8 rounded-3xl bg-[#1C1109] border border-rose-900/60 shadow-2xl text-center space-y-5 animate-scale-up">
+      <div className="min-h-screen app-bg-dark text-stone-100 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full p-8 rounded-3xl bg-[#3A241A] border border-rose-900/60 shadow-2xl text-center space-y-5 animate-scale-up">
           <div className="w-16 h-16 rounded-2xl bg-rose-950/70 text-rose-400 flex items-center justify-center mx-auto border border-rose-800/60 shadow-inner">
             <ShieldAlert className="w-8 h-8 text-rose-400" />
           </div>
@@ -142,7 +142,7 @@ export default function RoleGuard({
             <p className="text-xs text-stone-400 leading-relaxed">
               You are signed in as <span className="text-white font-bold">{roleInfo.label}</span>. Staff members cannot access unauthorized roles or admin consoles.
             </p>
-            <div className="p-3 rounded-xl bg-[#120B07] border border-[#2B1810] text-left text-xs">
+            <div className="p-3 rounded-xl bg-[#38210F] border border-[#2B1810] text-left text-xs">
               <p className="text-stone-400">
                 <strong className="text-stone-300">Station Policy:</strong> {roleInfo.description}
               </p>

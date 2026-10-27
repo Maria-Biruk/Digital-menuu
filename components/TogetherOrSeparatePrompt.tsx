@@ -46,7 +46,7 @@ export default function TogetherOrSeparatePrompt({
           className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer border text-left ${
             value === 'together'
               ? 'bg-[#2B1810] text-white border-[#2B1810] shadow-md'
-              : 'bg-white/80 dark:bg-[#1C1109] text-neutral-800 dark:text-stone-300 border-amber-500/20 hover:border-amber-500/40'
+              : 'bg-white/80 dark:bg-[#3A241A] text-neutral-800 dark:text-stone-300 border-amber-500/20 hover:border-amber-500/40'
           }`}
         >
           <UtensilsCrossed size={16} className={value === 'together' ? 'text-amber-400' : 'text-neutral-500'} />
@@ -59,7 +59,7 @@ export default function TogetherOrSeparatePrompt({
           className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer border text-left ${
             value === 'separate'
               ? 'bg-[#2B1810] text-white border-[#2B1810] shadow-md'
-              : 'bg-white/80 dark:bg-[#1C1109] text-neutral-800 dark:text-stone-300 border-amber-500/20 hover:border-amber-500/40'
+              : 'bg-white/80 dark:bg-[#3A241A] text-neutral-800 dark:text-stone-300 border-amber-500/20 hover:border-amber-500/40'
           }`}
         >
           <Zap size={16} className={value === 'separate' ? 'text-amber-400' : 'text-neutral-500'} />

@@ -7,7 +7,7 @@ import PickupCodeEntry from './PickupCodeEntry';
 
 interface WaiterFloorViewProps {
   tickets: Ticket[];
-  onMarkServed: (ticketId: string) => void;
+  onMarkServed: (orderId: string, code: string) => void;
   className?: string;
 }
 
@@ -24,11 +24,11 @@ export default function WaiterFloorView({
   // 3. Awaiting Pickup Code / In handoff
   const readyTickets = tickets.filter((t) => t.status === 'ready');
   const preparingTickets = tickets.filter((t) => t.status === 'preparing');
-  const queueTickets = tickets.filter((t) => t.status === 'queued' || (t.status as string) === 'queue');
+  const queueTickets = tickets.filter((t) => t.status === 'queued' || t.status === 'held');
 
   const handleConfirmCode = (code: string) => {
     if (activeCodeTicket) {
-      onMarkServed(activeCodeTicket.id);
+      onMarkServed(activeCodeTicket.order_id, code);
       setActiveCodeTicket(null);
     }
   };
@@ -50,14 +50,14 @@ export default function WaiterFloorView({
 
           <div className="space-y-3">
             {readyTickets.length === 0 ? (
-              <div className="p-8 text-center rounded-2xl bg-[#1C1109]/30 border border-stone-800 text-stone-500 text-xs">
+              <div className="p-8 text-center rounded-2xl bg-[#3A241A]/30 border border-stone-800 text-stone-500 text-xs">
                 No orders ready for delivery at the moment.
               </div>
             ) : (
               readyTickets.map((ticket) => (
                 <div
                   key={ticket.id}
-                  className="p-5 rounded-2xl bg-[#1C1109] border border-emerald-500/30 shadow-lg space-y-3"
+                  className="p-5 rounded-2xl bg-[#3A241A] border border-emerald-500/30 shadow-lg space-y-3"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-serif font-bold text-base text-white">
@@ -68,11 +68,24 @@ export default function WaiterFloorView({
                     </span>
                   </div>
 
-                  <div className="space-y-1 text-xs text-stone-300">
+                  <div className="space-y-2 text-xs text-stone-300">
                     {ticket.items.map((it, idx) => (
-                      <p key={idx}>
-                        <strong className="text-emerald-400">{it.quantity}x</strong> {it.name}
-                      </p>
+                      <div key={idx} className="flex items-center gap-2">
+                        {it.image ? (
+                          <img
+                            src={it.image}
+                            alt={it.name}
+                            className="w-9 h-9 rounded-lg object-cover border border-stone-700/60 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-lg bg-stone-800 border border-stone-700/60 shrink-0 flex items-center justify-center">
+                            <Utensils size={14} className="text-stone-500" />
+                          </div>
+                        )}
+                        <span>
+                          <strong className="text-emerald-400">{it.quantity}x</strong> {it.name}
+                        </span>
+                      </div>
                     ))}
                   </div>
 
@@ -109,14 +122,14 @@ export default function WaiterFloorView({
 
           <div className="space-y-3">
             {preparingTickets.length === 0 ? (
-              <div className="p-8 text-center rounded-2xl bg-[#1C1109]/30 border border-stone-800 text-stone-500 text-xs">
+              <div className="p-8 text-center rounded-2xl bg-[#3A241A]/30 border border-stone-800 text-stone-500 text-xs">
                 No orders currently in the cooking pipeline.
               </div>
             ) : (
               preparingTickets.map((ticket) => (
                 <div
                   key={ticket.id}
-                  className="p-5 rounded-2xl bg-[#1C1109] border border-cyan-500/20 shadow-md space-y-2 opacity-90"
+                  className="p-5 rounded-2xl bg-[#3A241A] border border-cyan-500/20 shadow-md space-y-2 opacity-90"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-serif font-bold text-sm text-stone-200">
@@ -127,11 +140,24 @@ export default function WaiterFloorView({
                     </span>
                   </div>
 
-                  <div className="space-y-1 text-xs text-stone-400">
+                  <div className="space-y-2 text-xs text-stone-400">
                     {ticket.items.map((it, idx) => (
-                      <p key={idx}>
-                        {it.quantity}x {it.name}
-                      </p>
+                      <div key={idx} className="flex items-center gap-2">
+                        {it.image ? (
+                          <img
+                            src={it.image}
+                            alt={it.name}
+                            className="w-8 h-8 rounded-lg object-cover border border-stone-700/60 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-lg bg-stone-800 border border-stone-700/60 shrink-0 flex items-center justify-center">
+                            <Utensils size={13} className="text-stone-500" />
+                          </div>
+                        )}
+                        <span>
+                          {it.quantity}x {it.name}
+                        </span>
+                      </div>
                     ))}
                   </div>
 
@@ -158,14 +184,14 @@ export default function WaiterFloorView({
 
           <div className="space-y-3">
             {queueTickets.length === 0 ? (
-              <div className="p-8 text-center rounded-2xl bg-[#1C1109]/30 border border-stone-800 text-stone-500 text-xs">
+              <div className="p-8 text-center rounded-2xl bg-[#3A241A]/30 border border-stone-800 text-stone-500 text-xs">
                 No freshly queued orders.
               </div>
             ) : (
               queueTickets.map((ticket) => (
                 <div
                   key={ticket.id}
-                  className="p-5 rounded-2xl bg-[#1C1109] border border-stone-800 space-y-2"
+                  className="p-5 rounded-2xl bg-[#3A241A] border border-stone-800 space-y-2"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-serif font-bold text-sm text-stone-300">
@@ -175,11 +201,24 @@ export default function WaiterFloorView({
                       Waiting for Chef
                     </span>
                   </div>
-                  <div className="space-y-1 text-xs text-stone-400">
+                  <div className="space-y-2 text-xs text-stone-400">
                     {ticket.items.map((it, idx) => (
-                      <p key={idx}>
-                        {it.quantity}x {it.name}
-                      </p>
+                      <div key={idx} className="flex items-center gap-2">
+                        {it.image ? (
+                          <img
+                            src={it.image}
+                            alt={it.name}
+                            className="w-8 h-8 rounded-lg object-cover border border-stone-700/60 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded-lg bg-stone-800 border border-stone-700/60 shrink-0 flex items-center justify-center">
+                            <Utensils size={13} className="text-stone-500" />
+                          </div>
+                        )}
+                        <span>
+                          {it.quantity}x {it.name}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 </div>

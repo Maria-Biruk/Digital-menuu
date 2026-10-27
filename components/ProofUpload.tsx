@@ -46,7 +46,7 @@ export default function ProofUpload({
         className={`relative border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center gap-2 ${
           selectedFileName
             ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
-            : 'border-neutral-300 dark:border-stone-800 bg-neutral-50/80 dark:bg-[#1C1109]/50 hover:border-[#2B1810]/50 hover:bg-neutral-100/50'
+            : 'border-neutral-300 dark:border-stone-800 bg-neutral-50/80 dark:bg-[#3A241A]/50 hover:border-[#2B1810]/50 hover:bg-neutral-100/50'
         }`}
       >
         <input

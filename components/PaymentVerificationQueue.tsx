@@ -38,7 +38,7 @@ export default function PaymentVerificationQueue({
 
   if (payments.length === 0) {
     return (
-      <div className={`text-center py-16 p-6 rounded-3xl bg-[#1C1109]/40 border border-stone-800 text-stone-400 ${className}`}>
+      <div className={`text-center py-16 p-6 rounded-3xl bg-[#3A241A]/40 border border-stone-800 text-stone-400 ${className}`}>
         <p className="font-serif text-base font-bold text-stone-200">
           No Pending Payment Verifications
         </p>
@@ -56,11 +56,12 @@ export default function PaymentVerificationQueue({
         {payments.map((payment) => {
           const currentTx = getTxValue(payment);
           const hasDuplicateWarning = isDuplicate(payment, currentTx);
+          const txMissing = !currentTx.trim();
 
           return (
             <div
               key={payment.id}
-              className="p-5 rounded-3xl bg-[#1C1109] border border-stone-800 shadow-xl space-y-3 transition-all"
+              className="p-5 rounded-3xl bg-[#3A241A] border border-stone-800 shadow-xl space-y-3 transition-all"
             >
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 {/* Order & Account Info */}
@@ -118,12 +119,17 @@ export default function PaymentVerificationQueue({
                       placeholder="Enter Bank TX ID..."
                       value={currentTx}
                       onChange={(e) => handleTxChange(payment.id, e.target.value)}
-                      className={`w-full sm:w-56 px-3.5 py-2 rounded-xl border text-xs font-mono bg-[#120B07] text-white focus:outline-none ${
+                      className={`w-full sm:w-56 px-3.5 py-2 rounded-xl border text-xs font-mono bg-[#38210F] text-white focus:outline-none ${
                         hasDuplicateWarning
                           ? 'border-rose-500 focus:border-rose-500'
-                          : 'border-stone-800 focus:border-[#2B1810]'
+                          : txMissing
+                            ? 'border-amber-600/60 focus:border-amber-500'
+                            : 'border-stone-800 focus:border-[#2B1810]'
                       }`}
                     />
+                    {txMissing && !hasDuplicateWarning && (
+                      <p className="text-[10px] text-amber-400/90 font-medium mt-1">Bank TX ID is required to approve.</p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -137,12 +143,13 @@ export default function PaymentVerificationQueue({
 
                     <button
                       type="button"
-                      disabled={hasDuplicateWarning}
+                      disabled={txMissing || hasDuplicateWarning}
                       onClick={() => onApprove(payment.id, currentTx)}
-                      className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow ${
-                        hasDuplicateWarning
+                      title={txMissing ? 'Enter the bank transaction ID first' : 'Approve and issue pickup code'}
+                      className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow ${
+                        txMissing || hasDuplicateWarning
                           ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
-                          : 'bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95 cursor-pointer'
                       }`}
                     >
                       <Check size={14} /> Approve & Issue Code
@@ -168,7 +175,7 @@ export default function PaymentVerificationQueue({
       {/* Modal for viewing receipt screenshot */}
       {modalImageUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="relative max-w-lg w-full bg-[#1C1109] rounded-3xl p-5 border border-stone-700 shadow-2xl">
+          <div className="relative max-w-lg w-full bg-[#3A241A] rounded-3xl p-5 border border-stone-700 shadow-2xl">
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-stone-800">
               <h4 className="font-serif text-sm font-bold text-white">
                 Payment Transfer Screenshot

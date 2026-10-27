@@ -16,10 +16,10 @@ const STATUS_CONFIG: Record<
   TicketStatus,
   { label: string; badgeClass: string; nextLabel: string }
 > = {
-  queue: {
-    label: 'Queued',
-    badgeClass: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
-    nextLabel: 'Start Preparing',
+  held: {
+    label: 'On Hold',
+    badgeClass: 'bg-stone-800 text-stone-300 border-stone-700',
+    nextLabel: 'Release & Start',
   },
   queued: {
     label: 'Queued',
@@ -34,17 +34,7 @@ const STATUS_CONFIG: Record<
   ready: {
     label: 'Ready for Service',
     badgeClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    nextLabel: 'Complete / Handed Off',
-  },
-  completed: {
-    label: 'Completed',
-    badgeClass: 'bg-stone-800 text-stone-400 border-stone-700',
-    nextLabel: 'Archived',
-  },
-  served: {
-    label: 'Served',
-    badgeClass: 'bg-stone-800 text-stone-400 border-stone-700',
-    nextLabel: 'Archived',
+    nextLabel: 'Ready',
   },
 };
 
@@ -57,7 +47,7 @@ export default function TicketQueue({
 }: TicketQueueProps) {
   if (tickets.length === 0) {
     return (
-      <div className={`text-center py-20 p-6 rounded-3xl bg-[#1C1109]/40 border border-stone-800 flex flex-col items-center justify-center ${className}`}>
+      <div className={`text-center py-20 p-6 rounded-3xl bg-[#3A241A]/40 border border-stone-800 flex flex-col items-center justify-center ${className}`}>
         <div className="w-14 h-14 rounded-full bg-stone-900 text-stone-600 flex items-center justify-center mb-3">
           <CheckCircle size={26} />
         </div>
@@ -74,13 +64,13 @@ export default function TicketQueue({
   return (
     <div className={`grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 ${className}`}>
       {tickets.map((ticket) => {
-        const config = STATUS_CONFIG[ticket.status] || STATUS_CONFIG.queue;
+        const config = STATUS_CONFIG[ticket.status] || STATUS_CONFIG.queued;
         const isReady = ticket.status === 'ready';
 
         return (
           <div
             key={ticket.id}
-            className={`flex flex-col justify-between p-5 rounded-3xl bg-[#1C1109]/80 border shadow-xl transition-all duration-200 ${
+            className={`flex flex-col justify-between p-5 rounded-3xl bg-[#3A241A]/80 border shadow-xl transition-all duration-200 ${
               isReady
                 ? 'border-emerald-500/40 shadow-emerald-950/20'
                 : 'border-stone-800/80 hover:border-stone-700'
@@ -108,17 +98,28 @@ export default function TicketQueue({
               {/* Items List */}
               <div className="space-y-2 mb-4">
                 {ticket.items.map((item, idx) => (
-                  <div key={idx} className="flex items-baseline justify-between gap-2 text-xs">
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-bold text-amber-400 text-sm">
+                  <div key={idx} className="flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {item.image ? (
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="w-10 h-10 rounded-lg object-cover border border-stone-700/60 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-stone-800 border border-stone-700/60 shrink-0 flex items-center justify-center">
+                          <Utensils size={15} className="text-stone-500" />
+                        </div>
+                      )}
+                      <span className="font-bold text-amber-400 text-sm shrink-0">
                         {item.quantity}x
                       </span>
-                      <span className="font-medium text-stone-200">
+                      <span className="font-medium text-stone-200 truncate">
                         {item.name}
                       </span>
                     </div>
                     {item.notes && (
-                      <span className="text-[10px] italic text-rose-300/80 bg-rose-950/30 px-2 py-0.5 rounded">
+                      <span className="text-[10px] italic text-rose-300/80 bg-rose-950/30 px-2 py-0.5 rounded shrink-0">
                         {item.notes}
                       </span>
                     )}
@@ -149,7 +150,7 @@ export default function TicketQueue({
                 </span>
               </div>
 
-              {ticket.status !== 'completed' && (
+              {ticket.status !== 'ready' && (
                 <button
                   type="button"
                   onClick={() => onAdvance(ticket.id)}

@@ -2,25 +2,42 @@
 
 import React, { useState } from 'react';
 import { Bell, CheckCircle2 } from 'lucide-react';
+import { supabaseBrowser, ensureDinerSession } from '../lib/supabase';
 
 interface CallWaiterButtonProps {
+  tableId?: string;
   tableLabel?: string;
   className?: string;
 }
 
 export default function CallWaiterButton({
+  tableId,
   tableLabel = 'Table',
   className = '',
 }: CallWaiterButtonProps) {
   const [isCalled, setIsCalled] = useState(false);
+  const [isSending, setIsSending] = useState(false);
 
-  const handleCall = () => {
-    if (isCalled) return;
-    setIsCalled(true);
-    // TODO: Insert row into Supabase waiter_calls table { table_id, status: 'pending', created_at }
-    setTimeout(() => {
-      setIsCalled(false);
-    }, 4000);
+  const handleCall = async () => {
+    if (isCalled || isSending) return;
+    if (!tableId) return;
+    setIsSending(true);
+    try {
+      await ensureDinerSession();
+      const { error } = await supabaseBrowser().rpc('call_waiter', { p_table: tableId });
+      if (error) {
+        console.error('call_waiter failed:', error.message);
+        return;
+      }
+      setIsCalled(true);
+      setTimeout(() => {
+        setIsCalled(false);
+      }, 4000);
+    } catch (err) {
+      console.error('call_waiter failed:', err);
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
