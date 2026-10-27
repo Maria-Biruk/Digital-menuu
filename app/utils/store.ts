@@ -213,7 +213,7 @@ const INITIAL_MENU_ITEMS: MenuItem[] = [
   },
   {
     id: "9",
-    name: "Meskel House Burger",
+    name: "Skill Coffee Burger",
     description: "Double house-blend beef patties, melted cheddar, local spiced butter caramelized onions, and house secret sauce on brioche bun.",
     price: 510,
     rating: 4.8,
