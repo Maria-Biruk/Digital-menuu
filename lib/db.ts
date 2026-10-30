@@ -203,11 +203,20 @@ export async function setTicketStatus(ticketId: string, status: TicketStatus): P
 }
 
 export async function setItemAvailability(itemId: string, available: boolean): Promise<void> {
-    const { error } = await supabaseBrowser().rpc("set_item_availability", {
+    const { data, error } = await supabaseBrowser().rpc("set_item_availability", {
         p_item: itemId,
         p_available: available,
     });
     if (error) throw new Error(error.message);
+    // RPCs with ok/reason style returns must be checked too, not just `error`.
+    const res = data as { ok?: boolean; reason?: string } | null;
+    if (res && res.ok === false) {
+        throw new Error(
+            res.reason === "not_found"
+                ? "Item not found — availability was not saved."
+                : "Availability was not saved to the database.",
+        );
+    }
 }
 
 export async function markOrderServed(orderId: string, code: string): Promise<void> {
@@ -450,18 +459,44 @@ export async function saveMenuItem(payload: Row, id?: string): Promise<void> {
         tag: payload.tag ?? null,
         sort_order: payload.sort_order ?? 0,
     };
+    // `.select()` makes Supabase return the affected rows, so we can detect the
+    // silent failure case: PostgREST returns no error when RLS blocks a write,
+    // it just updates/inserts 0 rows.
     if (id) {
-        const { error } = await sb.from("menu_items").update(clean).eq("id", id);
+        const { data, error } = await sb
+            .from("menu_items")
+            .update(clean)
+            .eq("id", id)
+            .select("id");
         if (error) throw new Error(error.message);
+        if (!data?.length) {
+            throw new Error(
+                "Save did not reach the database (no matching row was updated). Check that you are signed in with an admin account allowed to edit the menu (RLS).",
+            );
+        }
     } else {
-        const { error } = await sb.from("menu_items").insert(clean);
+        const { data, error } = await sb.from("menu_items").insert(clean).select("id");
         if (error) throw new Error(error.message);
+        if (!data?.length) {
+            throw new Error(
+                "Save did not reach the database (row was not inserted). Check that you are signed in with an admin account allowed to edit the menu (RLS).",
+            );
+        }
     }
 }
 
 export async function deleteMenuItem(id: string): Promise<void> {
-    const { error } = await supabaseBrowser().from("menu_items").delete().eq("id", id);
+    const { data, error } = await supabaseBrowser()
+        .from("menu_items")
+        .delete()
+        .eq("id", id)
+        .select("id");
     if (error) throw new Error(error.message);
+    if (!data?.length) {
+        throw new Error(
+            "Delete did not reach the database (no matching row was removed). Check admin permissions (RLS).",
+        );
+    }
 }
 
 export async function savePaymentAccount(acc: Partial<PaymentAccount>, id?: string): Promise<void> {

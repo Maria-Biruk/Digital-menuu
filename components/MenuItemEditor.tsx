@@ -79,7 +79,7 @@ export default function MenuItemEditor({
       is_available: isAvailable,
     };
 
-    // TODO: upsert into Supabase menu_items table
+    // Parent (admin/menu page) persists this via saveMenuItem() into Supabase.
     onSave(updated);
   };
 
