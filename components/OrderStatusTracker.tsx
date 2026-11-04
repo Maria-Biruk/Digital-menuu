@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Check, Clock, Flame, Coffee, ChefHat, BellCheck, CheckCircle2 } from 'lucide-react';
+import { Check, Clock, Flame, Coffee, ChefHat, BellCheck, CheckCircle2, Wallet } from 'lucide-react';
 import { OrderStatus } from '../lib/types';
 
 type OrderKind = 'food' | 'drink' | 'mixed';
@@ -9,12 +9,17 @@ type OrderKind = 'food' | 'drink' | 'mixed';
 interface OrderStatusTrackerProps {
   currentStatus?: OrderStatus;
   currentStep?: OrderStatus;
+  // The diner-facing flow is: Order Received → Payment Confirmed / Sent to
+  // Kitchen → Preparing → Ready → Served. The payment step is derived from
+  // orders.payment_status (the DB enum never stores it), so it arrives as
+  // its own prop instead of widening OrderStatus.
+  paymentConfirmed?: boolean;
   orderKind?: OrderKind;
   className?: string;
 }
 
 interface StepDef {
-  key: OrderStatus;
+  key: string;
   label: string;
   description: string;
   icon: React.ElementType;
@@ -42,8 +47,14 @@ function buildSteps(orderKind?: OrderKind): StepDef[] {
     {
       key: 'received',
       label: 'Order Received',
-      description: 'Payment confirmed and sent to the kitchen queue',
+      description: 'Your order reached the Skill Coffee counter',
       icon: Clock,
+    },
+    {
+      key: 'payment',
+      label: 'Payment Confirmed / Sent to Kitchen',
+      description: 'Cashier verified your payment and dispatched the order',
+      icon: Wallet,
     },
     {
       key: 'preparing',
@@ -66,22 +77,31 @@ function buildSteps(orderKind?: OrderKind): StepDef[] {
   ];
 }
 
-const STATUS_ORDER: Record<OrderStatus, number> = {
+// Rank of each DB status within the 5-step list above (payment sits at 1,
+// so received orders without payment confirmation stay on step 0).
+const STATUS_RANK: Record<OrderStatus, number> = {
   received: 0,
-  preparing: 1,
-  ready: 2,
-  served: 3,
+  preparing: 2,
+  ready: 3,
+  served: 4,
   cancelled: -1,
 };
 
 export default function OrderStatusTracker({
   currentStatus,
   currentStep,
+  paymentConfirmed = false,
   orderKind,
   className = '',
 }: OrderStatusTrackerProps) {
   const activeStatus = currentStatus || currentStep || 'received';
-  const currentIndex = STATUS_ORDER[activeStatus] ?? 0;
+  const statusRank = STATUS_RANK[activeStatus] ?? 0;
+  // The payment step is complete once the cashier approved the receipt — or
+  // once the order has already moved past it into the kitchen.
+  const currentIndex =
+    activeStatus === 'cancelled'
+      ? -1
+      : Math.max(statusRank, paymentConfirmed ? 1 : 0);
   const STEPS = buildSteps(orderKind);
 
   return (
@@ -89,7 +109,9 @@ export default function OrderStatusTracker({
       <div className="relative pl-6 sm:pl-8 space-y-6 before:absolute before:left-3 sm:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-neutral-200 dark:before:bg-stone-800">
         {STEPS.map((step, idx) => {
           const isDone = idx <= currentIndex;
-          const isCurrent = idx === currentIndex;
+          // The pulsing "In Progress" badge sits on the NEXT unfinished step —
+          // e.g. an order awaiting payment highlights the payment step.
+          const isCurrent = idx === currentIndex + 1 && activeStatus !== 'cancelled';
           const Icon = step.icon;
 
           return (

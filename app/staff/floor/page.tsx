@@ -25,6 +25,9 @@ import {
   Smartphone
 } from "lucide-react";
 import RoleGuard from "@/components/RoleGuard";
+import NotificationToast from "@/components/NotificationToast";
+import { useNewArrivalNotifier } from "@/lib/notify";
+import { orderNumber } from "@/lib/order-number";
 
 export default function WaiterFloorPage() {
   return (
@@ -104,8 +107,23 @@ function WaiterFloorContent() {
     }
   };
 
+  // Chime + toast for new waiter calls and newly ready tickets (composite id so
+  // a status change to "ready" counts as a fresh arrival).
+  const readyTickets = tickets.filter((t) => t.status === "ready");
+  const { toast: callToast, dismiss: dismissCall } = useNewArrivalNotifier(
+    callAlerts,
+    (c) => c.id,
+    (c) => ({ title: "Waiter Called", message: `🔔 ${c.table_label} needs assistance` }),
+  );
+  const { toast: readyToast, dismiss: dismissReady } = useNewArrivalNotifier(
+    readyTickets,
+    (t) => `${t.id}:ready`,
+    (t) => ({ title: "Order Ready", message: `✅ #${orderNumber(t.order_id)} · ${t.table_label} is ready to serve` }),
+  );
+
   return (
     <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
+      <NotificationToast toast={callToast ?? readyToast} onDismiss={() => { dismissCall(); dismissReady(); }} />
       <StaffHeader
         title="Floor Service Console"
         subtitle="Dining Room & Delivery"

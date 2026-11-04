@@ -5,6 +5,9 @@ import StaffHeader from "@/components/StaffHeader";
 import PaymentVerificationQueue from "@/components/PaymentVerificationQueue";
 import WalkInOrderForm from "@/components/WalkInOrderForm";
 import ApprovedOrderModal from "@/components/ApprovedOrderModal";
+import NotificationToast from "@/components/NotificationToast";
+import { useNewArrivalNotifier } from "@/lib/notify";
+import { orderNumber } from "@/lib/order-number";
 import { fetchPendingPayments, subscribePayments, approvePayment, rejectPayment, fetchOrderTickets } from "@/lib/db";
 import { Payment, Ticket } from "@/lib/types";
 import { CreditCard, ShieldCheck, UserPlus, Receipt, CheckCircle, AlertCircle } from "lucide-react";
@@ -85,8 +88,19 @@ function CashierPaymentsContent() {
     showNotification("Walk-in Order created successfully!");
   };
 
+  // Chime + toast when a diner submits a new payment proof to verify.
+  const { toast: arrivalToast, dismiss: dismissToast } = useNewArrivalNotifier(
+    payments,
+    (p) => p.id,
+    (p) => ({
+      title: "New Payment to Verify",
+      message: `💳 #${orderNumber(p.order_id)} · ${p.account_label} · ${p.amount.toLocaleString()} ETB awaiting review`,
+    }),
+  );
+
   return (
     <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
+      <NotificationToast toast={arrivalToast} onDismiss={dismissToast} />
       <StaffHeader
         title="Cashier & Billing Console"
         subtitle="Verification & Walk-in Terminal"

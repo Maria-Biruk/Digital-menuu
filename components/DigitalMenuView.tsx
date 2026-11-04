@@ -15,21 +15,17 @@ import {
   Flame,
   Star,
   Check,
-  Heart,
-  ThumbsUp,
   Sparkles,
-  Calendar,
-  User,
   Phone,
   Moon,
   Sun,
   Coffee,
   CheckCircle2,
   ChevronRight,
-  MessageSquare,
   ShieldCheck,
   SlidersHorizontal,
   UtensilsCrossed,
+  ListChecks,
 } from 'lucide-react';
 import { Lang, ServiceMode, MenuItem, FulfillmentType, Category, Table } from '../lib/types';
 import { SLUG, tI18n } from '../lib/mock';
@@ -38,6 +34,7 @@ import { supabaseBrowser, ensureDinerSession } from '../lib/supabase';
 import LanguageSwitcher from './LanguageSwitcher';
 import CallWaiterButton from './CallWaiterButton';
 import Cart, { CartLine } from './Cart';
+import { handleImgError } from '../lib/img';
 import TogetherOrSeparatePrompt from './TogetherOrSeparatePrompt';
 
 interface DigitalMenuViewProps {
@@ -78,18 +75,8 @@ export default function DigitalMenuView({
   const [modalInstructions, setModalInstructions] = useState('');
   const [modalFulfillment, setModalFulfillment] = useState<FulfillmentType>('takeaway');
   const [modalPhone, setModalPhone] = useState('');
-  const [itemLikes, setItemLikes] = useState<Record<string, number>>({});
-  const [userLikedItems, setUserLikedItems] = useState<Record<string, boolean>>({});
 
-  // Reservation Modal State
-  const [isReserveOpen, setIsReserveOpen] = useState(false);
-  const [reserveName, setReserveName] = useState('');
-  const [reservePhone, setReservePhone] = useState('');
-  const [reserveGuests, setReserveGuests] = useState('2');
-  const [reserveDate, setReserveDate] = useState('');
-  const [reserveTime, setReserveTime] = useState('19:00');
-  const [reserveNotes, setReserveNotes] = useState('');
-  const [reserveStatus, setReserveStatus] = useState<'idle' | 'loading' | 'success'>('idle');
+  // Order helpers + footer CTA actions (real tel:/mailto: links).
 
   // Initialize theme from localStorage or system preference
   useEffect(() => {
@@ -352,37 +339,30 @@ export default function DigitalMenuView({
     }
   };
 
-  // Like click handler
-  const handleToggleLike = (itemId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const isLiked = userLikedItems[itemId];
-    setUserLikedItems((prev) => ({ ...prev, [itemId]: !isLiked }));
-    setItemLikes((prev) => ({
-      ...prev,
-      [itemId]: (prev[itemId] || 0) + (isLiked ? -1 : 1),
-    }));
+  const scrollToMenu = (categorySlug?: string) => {
+    if (categorySlug) setActiveCategory(catIdBySlug[categorySlug] ?? 'all');
+    document.getElementById('menu-section')?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const getItemLikeCount = (item: MenuItem) => {
-    const baseLikes = item.likes || 25;
-    const offset = itemLikes[item.id] || 0;
-    return baseLikes + offset;
+  const footerContact = (kind: 'call' | 'email') => {
+    if (kind === 'call') window.location.href = 'tel:+251911234567';
+    else window.location.href = 'mailto:hello@skillcoffee.et?subject=Skill%20Coffee%20 enquiry';
   };
 
-  // Reservation submit handler
-  const handlePlaceReservation = (e: React.FormEvent) => {
-    e.preventDefault();
-    setReserveStatus('loading');
-    setTimeout(() => {
-      setReserveStatus('success');
-      setTimeout(() => {
-        setIsReserveOpen(false);
-        setReserveStatus('idle');
-        setReserveName('');
-        setReservePhone('');
-        setReserveNotes('');
-      }, 3000);
-    }, 1200);
+  // Open a dish from the footer "Products" shortcuts via fuzzy name match.
+  const openProductByName = (fragments: string[]) => {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, '');
+    const hit = MENU.find((m) => {
+      const n = norm(tI18n(m.name_i18n, 'en'));
+      return fragments.every((f) => n.includes(f));
+    });
+    if (hit) {
+      openDishDetail(hit);
+      return;
+    }
+    setSearchQuery(fragments[0]);
+    setActiveCategory('all');
+    document.getElementById('menu-section')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   return (
@@ -460,7 +440,26 @@ export default function DigitalMenuView({
             {/* Language Switcher */}
             <LanguageSwitcher currentLang={lang} onChange={setLang} />
 
-            {/* Cart Trigger in header */}
+            {/* Orders (placed) + Cart (unpaid basket) — Cart sits to the right */}
+            <button
+              type="button"
+              onClick={() => {
+                if (activeOrderId) router.push(`/${slug}/order/${activeOrderId}?table=${tableId}&lang=${lang}`);
+                else setIsDrawerOpen(true);
+              }}
+              className={`relative p-2 sm:px-3 sm:py-1.5 rounded-full border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                isDarkMode
+                  ? 'bg-[#2b1810] border-[#4a2b1c] text-white hover:bg-[#3A241A]'
+                  : 'bg-stone-100 text-[#2B1810] border-stone-300 hover:bg-stone-200'
+              }`}
+            >
+              <ListChecks size={15} className="text-amber-500" />
+              {activeOrderId && (
+                <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#2b1810]" />
+              )}
+              <span className="hidden sm:inline">Orders</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setIsDrawerOpen(true)}
@@ -471,10 +470,7 @@ export default function DigitalMenuView({
               }`}
             >
               <ShoppingBag size={15} className="text-amber-400" />
-              {activeOrderId && totalCartCount === 0 && (
-                <span className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-[#2b1810]" />
-              )}
-              <span className="hidden sm:inline">Order</span>
+              <span className="hidden sm:inline">Cart</span>
               {totalCartCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-stone-950 text-[10px] font-extrabold ml-0.5">
                   {totalCartCount}
@@ -533,7 +529,8 @@ export default function DigitalMenuView({
           {/* Background image with high quality gastronomy & roast visuals */}
           <img
             src="https://images.unsplash.com/photo-1544025162-d76694265947?w=1600&auto=format&fit=crop&q=85"
-            alt="A menu made to be savoured"
+            alt="Skill Coffee dining room"
+            onError={handleImgError}
             className="absolute inset-0 w-full h-full object-cover object-center scale-105 filter brightness-75"
           />
 
@@ -543,12 +540,6 @@ export default function DigitalMenuView({
 
           {/* Hero Content */}
           <div className="relative z-10 max-w-2xl p-6 sm:p-10 lg:p-12 space-y-4 sm:space-y-6">
-            {/* Top Star Rating & Location Badge */}
-            <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-md text-white text-xs sm:text-sm font-semibold border border-white/15 shadow-lg">
-              <Star size={14} className="fill-amber-400 text-amber-400" />
-              <span>4.9 · Addis Ababa</span>
-            </div>
-
             {/* Headline */}
             <h2 className="font-serif text-3xl sm:text-5xl lg:text-6xl font-bold text-white tracking-tight leading-[1.1]">
               A menu made to be savoured
@@ -556,7 +547,7 @@ export default function DigitalMenuView({
 
             {/* Subtitle */}
             <p className="text-xs sm:text-base text-stone-200/90 font-light leading-relaxed max-w-lg">
-              Seasonal plates, single-origin coffee and craft cocktails — served in the heart of Addis Ababa.
+              Freshly roasted single-origin coffee, artisan pastries and authentic Ethiopian dishes — served in the heart of Addis Ababa.
             </p>
 
             {/* Action Buttons */}
@@ -571,11 +562,11 @@ export default function DigitalMenuView({
 
               <button
                 type="button"
-                onClick={() => setIsReserveOpen(true)}
+                onClick={() => footerContact('call')}
                 className="px-6 py-3.5 rounded-full bg-stone-900/80 hover:bg-stone-800 text-white border border-stone-700/80 backdrop-blur-md font-semibold text-xs sm:text-sm flex items-center gap-2 shadow-xl active:scale-95 transition-all cursor-pointer"
               >
-                <Calendar size={15} className="text-amber-400" />
-                <span>Reserve a table</span>
+                <Phone size={15} className="text-amber-400" />
+                <span>Call to Reserve</span>
               </button>
             </div>
           </div>
@@ -643,6 +634,7 @@ export default function DigitalMenuView({
                 <div className="relative aspect-[4/3] w-full overflow-hidden bg-stone-100 dark:bg-stone-900">
                   <img
                     src={item.image_path}
+                    onError={handleImgError}
                     alt={tI18n(item.name_i18n, lang)}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
@@ -682,25 +674,14 @@ export default function DigitalMenuView({
                     : 'bg-[#FAF5EC] border-[#D4B896] shadow-sm hover:shadow-md hover:border-amber-600/40'
                 }`}
               >
-                {/* Image & Like Badge */}
+                {/* Image */}
                 <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-stone-100 dark:bg-stone-900 mb-2.5">
                   <img
                     src={item.image_path}
+                    onError={handleImgError}
                     alt={tI18n(item.name_i18n, lang)}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
-                  {/* Thumbs up badge (From Photo 2) */}
-                  <button
-                    type="button"
-                    onClick={(e) => handleToggleLike(item.id, e)}
-                    className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-black/65 backdrop-blur-md text-white text-[10px] font-bold flex items-center gap-1 border border-white/10 hover:bg-black/80 transition-colors"
-                  >
-                    <ThumbsUp
-                      size={10}
-                      className={userLikedItems[item.id] ? 'text-amber-400 fill-amber-400' : 'text-stone-300'}
-                    />
-                    <span>{getItemLikeCount(item)}</span>
-                  </button>
 
                   <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-amber-500 text-stone-950 text-[9px] font-extrabold uppercase">
                     {item.avg_prep_minutes}m
@@ -902,6 +883,7 @@ export default function DigitalMenuView({
                     <div className="relative aspect-[4/3] w-full overflow-hidden bg-stone-100 dark:bg-stone-900">
                       <img
                         src={dish.image_path}
+                        onError={handleImgError}
                         alt={tI18n(dish.name_i18n, lang)}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
@@ -1033,6 +1015,7 @@ export default function DigitalMenuView({
             <div className="relative w-full h-64 sm:h-80 overflow-hidden bg-stone-900 rounded-t-[2.5rem] sm:rounded-t-[2.5rem]">
               <img
                 src={selectedDish.image_path}
+                onError={handleImgError}
                 alt={tI18n(selectedDish.name_i18n, lang)}
                 className="w-full h-full object-cover"
               />
@@ -1212,30 +1195,8 @@ export default function DigitalMenuView({
                 )}
               </div>
 
-              {/* Interactive Like & Share */}
-              <div className="flex items-center justify-between pt-2">
-                <button
-                  type="button"
-                  onClick={() => handleToggleLike(selectedDish.id)}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition-colors cursor-pointer ${
-                    userLikedItems[selectedDish.id]
-                      ? 'bg-rose-500/10 text-rose-500 border-rose-500/30'
-                      : isDarkMode
-                      ? 'bg-[#3A241A] text-stone-300 border-[#3d2114]'
-                      : 'bg-stone-100 text-stone-700 border-stone-200'
-                  }`}
-                >
-                  <ThumbsUp
-                    size={14}
-                    className={userLikedItems[selectedDish.id] ? 'fill-rose-500 text-rose-500' : ''}
-                  />
-                  <span>
-                    {userLikedItems[selectedDish.id]
-                      ? (lang === 'am' ? 'ተወዷል!' : 'Liked!')
-                      : (lang === 'am' ? 'ይህን ምግብ ውደድ' : 'Like this item')}{' '}
-                    ({getItemLikeCount(selectedDish)})
-                  </span>
-                </button>
+              {/* Freshly made note */}
+              <div className="flex items-center justify-end pt-1">
                 <span className="text-[11px] text-stone-400 font-medium">
                   {lang === 'am' ? 'Freshly made' : 'Freshly made to order'}
                 </span>
@@ -1284,7 +1245,7 @@ export default function DigitalMenuView({
                 className="flex-1 py-3 px-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs sm:text-sm shadow-xl flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer"
               >
                 <UtensilsCrossed size={15} />
-                <span>{lang === 'am' ? 'አሁን ይዘዙ' : 'Order Now'}</span>
+                <span>{lang === 'am' ? 'ወደ ባስኬት ጨምር' : 'Add to Order'}</span>
                 <span className="font-serif font-bold ml-0.5">{(selectedDish.price * modalQty).toLocaleString()} ETB</span>
               </button>
             </div>
@@ -1292,186 +1253,6 @@ export default function DigitalMenuView({
         </div>
       )}
 
-
-      {/* ========================================================= */}
-      {/* TABLE RESERVATION MODAL */}
-      {/* ========================================================= */}
-      {isReserveOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            onClick={() => setIsReserveOpen(false)}
-            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-          />
-
-          <div
-            className={`relative w-full max-w-md rounded-3xl p-6 sm:p-7 shadow-2xl z-10 animate-scale-up border ${
-              isDarkMode
-                ? 'bg-[#3A241A] border-[#442417] text-[#f7e6d2]'
-                : 'bg-white border-stone-200 text-[#2B1810]'
-            }`}
-          >
-            <div className="flex items-center justify-between border-b pb-3 mb-4 border-stone-200 dark:border-stone-800">
-              <div className="flex items-center gap-2">
-                <Sparkles size={18} className="text-amber-500" />
-                <h4 className="font-serif text-lg font-bold">
-                  Reserve a Table
-                </h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsReserveOpen(false)}
-                className="p-1 rounded-full text-stone-400 hover:text-stone-700 dark:hover:text-white"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {reserveStatus === 'success' ? (
-              <div className="py-8 text-center flex flex-col items-center justify-center space-y-3">
-                <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
-                  <CheckCircle2 size={32} />
-                </div>
-                <h5 className="font-serif text-xl font-bold">
-                  Reservation Confirmed!
-                </h5>
-                <p className="text-xs text-stone-400 max-w-xs leading-relaxed">
-                  We look forward to welcoming you at Skill Coffee. A confirmation SMS will be sent.
-                </p>
-              </div>
-            ) : (
-              <form onSubmit={handlePlaceReservation} className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
-                    Full Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Sara Haile"
-                    value={reserveName}
-                    onChange={(e) => setReserveName(e.target.value)}
-                    className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none ${
-                      isDarkMode
-                        ? 'bg-[#3A241A] border-[#442417] text-white focus:border-amber-500'
-                        : 'bg-stone-50 border-stone-200 text-neutral-900 focus:border-[#2B1810]'
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="e.g. 0911 234 567"
-                    value={reservePhone}
-                    onChange={(e) => setReservePhone(e.target.value)}
-                    className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none ${
-                      isDarkMode
-                        ? 'bg-[#3A241A] border-[#442417] text-white focus:border-amber-500'
-                        : 'bg-stone-50 border-stone-200 text-neutral-900 focus:border-[#2B1810]'
-                    }`}
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
-                      Guests
-                    </label>
-                    <select
-                      value={reserveGuests}
-                      onChange={(e) => setReserveGuests(e.target.value)}
-                      className={`w-full text-xs px-2.5 py-2.5 rounded-xl border focus:outline-none ${
-                        isDarkMode
-                          ? 'bg-[#3A241A] border-[#442417] text-white'
-                          : 'bg-stone-50 border-stone-200 text-neutral-900'
-                      }`}
-                    >
-                      <option value="1">1 Person</option>
-                      <option value="2">2 People</option>
-                      <option value="3">3 People</option>
-                      <option value="4">4 People</option>
-                      <option value="5">5+ People</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
-                      Date
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      value={reserveDate}
-                      onChange={(e) => setReserveDate(e.target.value)}
-                      className={`w-full text-xs px-2.5 py-2.5 rounded-xl border focus:outline-none ${
-                        isDarkMode
-                          ? 'bg-[#3A241A] border-[#442417] text-white'
-                          : 'bg-stone-50 border-stone-200 text-neutral-900'
-                      }`}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
-                      Time
-                    </label>
-                    <input
-                      type="time"
-                      required
-                      value={reserveTime}
-                      onChange={(e) => setReserveTime(e.target.value)}
-                      className={`w-full text-xs px-2 py-2.5 rounded-xl border focus:outline-none ${
-                        isDarkMode
-                          ? 'bg-[#3A241A] border-[#442417] text-white'
-                          : 'bg-stone-50 border-stone-200 text-neutral-900'
-                      }`}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
-                    Special Seating / Occasion
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Window table, Birthday, Quiet patio"
-                    value={reserveNotes}
-                    onChange={(e) => setReserveNotes(e.target.value)}
-                    className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none ${
-                      isDarkMode
-                        ? 'bg-[#3A241A] border-[#442417] text-white focus:border-amber-500'
-                        : 'bg-stone-50 border-stone-200 text-neutral-900 focus:border-[#2B1810]'
-                    }`}
-                  />
-                </div>
-
-                {reserveStatus === 'loading' ? (
-                  <button
-                    type="button"
-                    disabled
-                    className="w-full py-3.5 rounded-xl bg-amber-500/50 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 cursor-not-allowed"
-                  >
-                    <div className="w-4 h-4 border-2 border-stone-950 border-t-transparent rounded-full animate-spin" />
-                    <span>Confirming Table...</span>
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow-lg active:scale-95 transition-all cursor-pointer"
-                  >
-                    Confirm Reservation
-                  </button>
-                )}
-              </form>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Floating Call Waiter Button */}
       <CallWaiterButton tableLabel={tableDisplay} />
@@ -1629,47 +1410,92 @@ export default function DigitalMenuView({
       <footer className="mt-20 border-t bg-[#3A241A] text-[#E8DFD8] border-[#3D2415]">
         <div className="max-w-7xl mx-auto px-6 sm:px-8 py-12 space-y-10">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {/* Products Column */}
+            {/* Products Column — opens the real dish detail */}
             <div className="space-y-3">
               <h5 className="font-serif text-sm font-bold uppercase tracking-wider text-white">
                 Products
               </h5>
               <ul className="text-xs space-y-2 opacity-80">
-                <li>Mocha Coffee</li>
-                <li>Espresso Coffee</li>
-                <li>Lata Coffee</li>
-                <li>Biscoff Milkshakes</li>
-                <li>Doro Wat Platter</li>
-                <li>Beyaynetu Feast</li>
+                {[
+                  { label: 'Mocha Coffee', parts: ['mocha'] },
+                  { label: 'Espresso Coffee', parts: ['espresso'] },
+                  { label: 'Biscoff Milkshakes', parts: ['biscoff'] },
+                  { label: 'Doro Wat Platter', parts: ['doro'] },
+                  { label: 'Beyaynetu Feast', parts: ['beyaynet'] },
+                  { label: 'Cheeseburger', parts: ['cheese', 'burger'] },
+                ].map((p) => (
+                  <li key={p.label}>
+                    <button
+                      type="button"
+                      onClick={() => openProductByName(p.parts)}
+                      className="hover:text-amber-300 transition-colors cursor-pointer text-left"
+                    >
+                      {p.label}
+                    </button>
+                  </li>
+                ))}
               </ul>
             </div>
 
-            {/* Category Column */}
+            {/* Category Column — real filters into the menu grid */}
             <div className="space-y-3">
               <h5 className="font-serif text-sm font-bold uppercase tracking-wider text-white">
                 Category
               </h5>
               <ul className="text-xs space-y-2 opacity-80">
-                <li>Coffee & Hot Drinks</li>
-                <li>Specialty Milkshakes</li>
-                <li>Traditional Breakfast</li>
-                <li>Authentic Ethiopian</li>
-                <li>Pizza & Sourdough</li>
-                <li>Artisan Desserts</li>
+                {CATEGORIES.slice(0, 6).map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => scrollToMenu(c.slug)}
+                      className="hover:text-amber-300 transition-colors cursor-pointer text-left"
+                    >
+                      {tI18n(c.name_i18n, lang)}
+                    </button>
+                  </li>
+                ))}
               </ul>
             </div>
 
-            {/* Company Info Column */}
+            {/* Company Info Column — working contact actions */}
             <div className="space-y-3">
               <h5 className="font-serif text-sm font-bold uppercase tracking-wider text-white">
                 Company Info
               </h5>
               <ul className="text-xs space-y-2 opacity-80">
-                <li>About Skill Coffee</li>
-                <li>Skill Coffee Roastery</li>
-                <li>Table Reservations</li>
-                <li>Contact & Location</li>
-                <li>Customer Support</li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                    className="hover:text-amber-300 transition-colors cursor-pointer text-left"
+                  >
+                    About Skill Coffee
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => scrollToMenu('coffee-drinks')}
+                    className="hover:text-amber-300 transition-colors cursor-pointer text-left"
+                  >
+                    Skill Coffee Roastery
+                  </button>
+                </li>
+                <li>
+                  <button type="button" onClick={() => footerContact('call')} className="hover:text-amber-300 transition-colors cursor-pointer text-left">
+                    Table Reservations
+                  </button>
+                </li>
+                <li>
+                  <a href="https://maps.google.com/?q=Skill+Coffee+Addis+Ababa" target="_blank" rel="noopener noreferrer" className="hover:text-amber-300 transition-colors">
+                    Contact &amp; Location
+                  </a>
+                </li>
+                <li>
+                  <button type="button" onClick={() => footerContact('email')} className="hover:text-amber-300 transition-colors cursor-pointer text-left">
+                    Customer Support
+                  </button>
+                </li>
               </ul>
             </div>
 
@@ -1683,7 +1509,7 @@ export default function DigitalMenuView({
               </p>
               <div className="flex items-center gap-3 pt-1">
                 <a
-                  href="#instagram"
+                  href="https://www.instagram.com/skillcofee" target="_blank" rel="noopener noreferrer"
                   aria-label="Instagram"
                   className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-amber-400 transition-colors"
                 >
@@ -1692,7 +1518,7 @@ export default function DigitalMenuView({
                   </svg>
                 </a>
                 <a
-                  href="#facebook"
+                  href="https://www.facebook.com/skillcofee" target="_blank" rel="noopener noreferrer"
                   aria-label="Facebook"
                   className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-blue-400 transition-colors"
                 >
@@ -1701,7 +1527,7 @@ export default function DigitalMenuView({
                   </svg>
                 </a>
                 <a
-                  href="#youtube"
+                  href="https://www.youtube.com/@skillcofee" target="_blank" rel="noopener noreferrer"
                   aria-label="YouTube"
                   className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-rose-500 transition-colors"
                 >
@@ -1716,9 +1542,9 @@ export default function DigitalMenuView({
           <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row items-center justify-between text-[11px] opacity-70 gap-2">
             <p>© 2026 Skill Coffee · Addis Ababa, Ethiopia.</p>
             <div className="flex items-center gap-4">
-              <span>Privacy Policy</span>
+              <a href="tel:+251911234567" className="hover:text-amber-300 transition-colors">Contact Us</a>
               <span>•</span>
-              <span>Terms of Service</span>
+              <a href="mailto:hello@skillcoffee.et" className="hover:text-amber-300 transition-colors">hello@skillcoffee.et</a>
             </div>
           </div>
         </div>

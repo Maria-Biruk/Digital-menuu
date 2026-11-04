@@ -1,4 +1,5 @@
 import { supabaseBrowser } from "./supabase";
+import { registerOrderNumbers } from "./order-number";
 import type {
     Category,
     MenuItem,
@@ -168,6 +169,37 @@ export async function fetchOrderTickets(orderId: string): Promise<Ticket[]> {
         .order("station");
     if (error) throw new Error(error.message);
     return ((data ?? []) as Row[]).map(mapTicketRow);
+}
+
+/**
+ * Fill the order-number registry with sequential per-day numbers (#1, #2, #3…).
+ * Give it anything carrying an order_id + its timestamp (tickets, payments,
+ * an order row); every order of the involved days is fetched in arrival
+ * order so ranks are complete. Failures are swallowed — orderNumber() then
+ * falls back to the legacy hash code.
+ */
+export async function syncOrderSequence(
+    items: { order_id: string; created_at: string }[],
+): Promise<void> {
+    if (!items.length) return;
+    const days = [...new Set(items.map((i) => String(i.created_at ?? "").slice(0, 10)))];
+    const sb = supabaseBrowser();
+    await Promise.all(
+        days
+            .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+            .map(async (day) => {
+                const { data, error } = await sb
+                    .from("orders")
+                    .select("id, created_at")
+                    .gte("created_at", `${day}T00:00:00.000Z`)
+                    .lte("created_at", `${day}T23:59:59.999Z`)
+                    .order("created_at", { ascending: true });
+                if (error || !data) return;
+                registerOrderNumbers(
+                    (data as Row[]).map((r, idx) => ({ orderId: String(r.id), seq: idx + 1 })),
+                );
+            }),
+    );
 }
 
 export function subscribeTickets(onChange: () => void, table = "tickets-feed"): () => void {
@@ -453,9 +485,11 @@ export async function saveMenuItem(payload: Row, id?: string): Promise<void> {
         station: payload.station,
         avg_prep_minutes: payload.avg_prep_minutes ?? 10,
         is_available: payload.is_available ?? true,
-        calories: payload.calories ?? null,
-        ingredients: payload.ingredients ?? null,
-        rating: payload.rating ?? null,
+        calories: payload.calories ?? 0,
+        // `ingredients` is NOT NULL in the DB — never send null here or the
+        // insert fails with a 23502 not-null violation.
+        ingredients: payload.ingredients ?? [],
+        rating: payload.rating ?? 0,
         tag: payload.tag ?? null,
         sort_order: payload.sort_order ?? 0,
     };
@@ -558,6 +592,21 @@ export interface Analytics {
     topSellers: { rank: number; name: string; orders: number; revenue: number }[];
     categoryBreakdown: { name: string; count: number; percentage: number }[];
     revenueSeries: { label: string; value: number }[];
+    // Order VOLUME trend (count of non-cancelled orders per bucket) — reveals
+    // peak hours/days, kept separate from revenue so the two charts never
+    // duplicate the same series.
+    ordersSeries: { label: string; value: number }[];
+    // Up to 3 category lines over the same buckets. Each bucket also carries
+    // its top-3 selling items so hovering the line reveals item detail.
+    categorySeries: {
+        name: string;
+        points: number[];
+        topItemsByBucket: { name: string; qty: number }[][];
+    }[];
+    // Every item sold across the full period — powers the CSV export and the
+    // best-sellers table beyond the top-5 "today" list.
+    itemSales: { name: string; category: string; quantity: number; revenue: number }[];
+    peakBucket: string;
 }
 
 export type AnalyticsPeriod = "today" | "week" | "month" | "year";
@@ -597,58 +646,74 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
     const activeQueue = orders.filter((o) => o.status === "received" || o.status === "preparing").length;
     const avgOrderValue = valid.length ? Math.round(grossRevenue / valid.length) : 0;
 
-    // Revenue time-series: hourly (today), daily (week/month), monthly (year).
-    const revenueSeries: Analytics["revenueSeries"] = [];
+    // Unified time buckets shared by the revenue, order-volume and category
+    // trend charts: hourly (today), daily (week/month), monthly (year).
+    const bucketLabels: string[] = [];
+    let bucketOf: (d: Date) => number;
     if (period === "today") {
-        const buckets = new Array(24).fill(0);
-        valid.forEach((o) => {
-            buckets[new Date(o.created_at).getHours()] += Number(o.total ?? 0);
-        });
-        for (let h = 6; h <= 22; h++) {
-            revenueSeries.push({ label: `${String(h).padStart(2, "0")}:00`, value: Math.round(buckets[h]) });
-        }
+        for (let h = 6; h <= 22; h++) bucketLabels.push(`${String(h).padStart(2, "0")}:00`);
+        bucketOf = (d) => {
+            const h = d.getHours();
+            return h >= 6 && h <= 22 ? h - 6 : -1;
+        };
     } else if (period === "year") {
-        const months: { key: string; label: string; value: number }[] = [];
+        const months: string[] = [];
         for (let i = 0; i < 12; i++) {
             const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-            months.push({
-                key: `${d.getFullYear()}-${d.getMonth()}`,
-                label: d.toLocaleDateString("en", { month: "short" }),
-                value: 0,
-            });
+            months.push(`${d.getFullYear()}-${d.getMonth()}`);
+            bucketLabels.push(d.toLocaleDateString("en", { month: "short" }));
         }
-        valid.forEach((o) => {
-            const d = new Date(o.created_at);
-            const month = months.find((x) => x.key === `${d.getFullYear()}-${d.getMonth()}`);
-            if (month) month.value += Number(o.total ?? 0);
-        });
-        months.forEach((m) => revenueSeries.push({ label: m.label, value: Math.round(m.value) }));
+        bucketOf = (d) => months.indexOf(`${d.getFullYear()}-${d.getMonth()}`);
     } else {
         // week (7 days) or month (30 days): daily buckets.
-        const days: { key: string; label: string; value: number }[] = [];
+        const dayKeys: string[] = [];
         const cursor = new Date(start);
         while (cursor <= now) {
-            days.push({
-                key: cursor.toDateString(),
-                label:
-                    period === "month"
-                        ? String(cursor.getDate())
-                        : cursor.toLocaleDateString("en", { weekday: "short" }),
-                value: 0,
-            });
+            dayKeys.push(cursor.toDateString());
+            bucketLabels.push(
+                period === "month"
+                    ? String(cursor.getDate())
+                    : cursor.toLocaleDateString("en", { weekday: "short" }),
+            );
             cursor.setDate(cursor.getDate() + 1);
         }
-        valid.forEach((o) => {
-            const key = new Date(o.created_at).toDateString();
-            const day = days.find((x) => x.key === key);
-            if (day) day.value += Number(o.total ?? 0);
-        });
-        days.forEach((d) => revenueSeries.push({ label: d.label, value: Math.round(d.value) }));
+        bucketOf = (d) => dayKeys.indexOf(d.toDateString());
     }
+
+    const nBuckets = bucketLabels.length;
+    const revenueArr = new Array(nBuckets).fill(0);
+    const ordersArr = new Array(nBuckets).fill(0);
+    const orderDateById = new Map<string, Date>();
+    orders.forEach((o) => orderDateById.set(o.id, new Date(o.created_at)));
+
+    valid.forEach((o) => {
+        const idx = bucketOf(new Date(o.created_at));
+        if (idx >= 0) {
+            revenueArr[idx] += Number(o.total ?? 0);
+            ordersArr[idx] += 1;
+        }
+    });
+
+    const revenueSeries: Analytics["revenueSeries"] = bucketLabels.map((label, i) => ({
+        label,
+        value: Math.round(revenueArr[i]),
+    }));
+    const ordersSeries: Analytics["ordersSeries"] = bucketLabels.map((label, i) => ({
+        label,
+        value: ordersArr[i],
+    }));
+    // Busiest bucket (peak hour/day) — a headline insight on the dashboard.
+    let peakIdx = 0;
+    ordersArr.forEach((v, i) => {
+        if (v > ordersArr[peakIdx]) peakIdx = i;
+    });
+    const peakBucket = nBuckets ? bucketLabels[peakIdx] : "—";
 
     const ids = orders.map((o) => o.id);
     let topSellers: Analytics["topSellers"] = [];
     let categoryBreakdown: Analytics["categoryBreakdown"] = [];
+    let itemSales: Analytics["itemSales"] = [];
+    let categorySeries: Analytics["categorySeries"] = [];
 
     if (ids.length) {
         const { data: itemRows, error: itemErr } = await sb
@@ -665,16 +730,24 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
                 .filter((o) => new Date(o.created_at).toDateString() === todayKey)
                 .map((o) => o.id),
         );
+        const validIdSet = new Set(valid.map((o) => o.id));
 
         const byItem = new Map<string, { name: string; orders: number; revenue: number }>();
         const byCat = new Map<string, number>();
+        const fullItem = new Map<string, { name: string; category: string; quantity: number; revenue: number }>();
+        // cat -> bucket index -> item name -> qty (drives per-category trend + hover).
+        const catBucketItems = new Map<string, Map<number, Map<string, number>>>();
         let totalUnits = 0;
 
         ((itemRows ?? []) as Row[]).forEach((r) => {
+            // Trends & export only count non-cancelled orders.
+            if (!validIdSet.has(r.order_id)) return;
             const mi = Array.isArray(r.menu_items) ? r.menu_items[0] : r.menu_items;
             const qty = Number(r.quantity ?? 0);
             const revenue = qty * Number(r.unit_price ?? 0);
             const name = String(mi?.name_i18n?.en ?? "Item");
+            const cat = Array.isArray(mi?.categories) ? mi.categories[0] : mi?.categories;
+            const catName = String(cat?.name_i18n?.en ?? "Other");
 
             // Best-sellers ranking: today only.
             if (todayIds.has(r.order_id)) {
@@ -684,11 +757,24 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
                 byItem.set(name, agg);
             }
 
-            // Category distribution: follows the selected period.
-            const cat = Array.isArray(mi?.categories) ? mi.categories[0] : mi?.categories;
-            const catName = String(cat?.name_i18n?.en ?? "Other");
+            // Category distribution + full item sales (follows the period).
             byCat.set(catName, (byCat.get(catName) ?? 0) + qty);
             totalUnits += qty;
+            const fi = fullItem.get(name) ?? { name, category: catName, quantity: 0, revenue: 0 };
+            fi.quantity += qty;
+            fi.revenue += revenue;
+            fullItem.set(name, fi);
+
+            // Per-category per-bucket item counts for the trend hover.
+            const od = orderDateById.get(r.order_id);
+            const idx = od ? bucketOf(od) : -1;
+            if (idx >= 0) {
+                if (!catBucketItems.has(catName)) catBucketItems.set(catName, new Map());
+                const perBucket = catBucketItems.get(catName)!;
+                if (!perBucket.has(idx)) perBucket.set(idx, new Map());
+                const perItem = perBucket.get(idx)!;
+                perItem.set(name, (perItem.get(name) ?? 0) + qty);
+            }
         });
 
         // Rank by units sold (most-sold items first), tie-broken by revenue.
@@ -705,7 +791,49 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
             }))
             .sort((a, b) => b.count - a.count)
             .slice(0, 5);
+
+        itemSales = [...fullItem.values()]
+            .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue)
+            .map((x) => ({
+                name: x.name,
+                category: x.category,
+                quantity: x.quantity,
+                revenue: Math.round(x.revenue),
+            }));
+
+        // Top 3 categories by units sold → one line each on the volume chart.
+        categorySeries = [...byCat.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([catName]) => {
+                const perBucket = catBucketItems.get(catName) ?? new Map<number, Map<string, number>>();
+                const points = bucketLabels.map((_, i) => {
+                    const m = perBucket.get(i);
+                    return m ? [...m.values()].reduce((s, v) => s + v, 0) : 0;
+                });
+                const topItemsByBucket = bucketLabels.map((_, i) => {
+                    const m = perBucket.get(i);
+                    if (!m) return [] as { name: string; qty: number }[];
+                    return [...m.entries()]
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 3)
+                        .map(([name, qty]) => ({ name, qty }));
+                });
+                return { name: catName, points, topItemsByBucket };
+            });
     }
 
-    return { grossRevenue: Math.round(grossRevenue), completedOrders, activeQueue, avgOrderValue, topSellers, categoryBreakdown, revenueSeries };
+    return {
+        grossRevenue: Math.round(grossRevenue),
+        completedOrders,
+        activeQueue,
+        avgOrderValue,
+        topSellers,
+        categoryBreakdown,
+        revenueSeries,
+        ordersSeries,
+        categorySeries,
+        itemSales,
+        peakBucket,
+    };
 }

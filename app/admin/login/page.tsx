@@ -109,22 +109,22 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen app-bg-dark text-stone-100 flex flex-col justify-center items-center px-4 relative overflow-hidden font-sans">
+    <div className="min-h-screen app-bg-dark text-stone-100 flex flex-col justify-center items-center px-4 py-6 sm:py-0 relative overflow-hidden font-sans">
       {/* Decorative Orbs */}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-[#2B1810] opacity-40 blur-[130px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-amber-600 opacity-15 blur-[120px] pointer-events-none" />
 
       <Link
         href="/meskel-house/order"
-        className="absolute top-6 left-6 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-stone-400 hover:text-white transition-colors py-2 px-4 rounded-full border border-[#2B1810] bg-[#3A241A]/80 backdrop-blur"
+        className="absolute top-4 left-4 sm:top-6 sm:left-6 flex min-h-[44px] items-center gap-2 text-xs font-semibold uppercase tracking-wider text-stone-400 hover:text-white transition-colors py-2.5 px-4 rounded-full border border-[#2B1810] bg-[#3A241A]/80 backdrop-blur"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
         Customer Menu
       </Link>
 
-      <div className="w-full max-w-md my-8">
+      <div className="w-full max-w-md my-2 sm:my-8">
         {/* Logo and Brand */}
-        <div className="text-center mb-8 flex flex-col items-center">
+        <div className="text-center mb-5 sm:mb-8 flex flex-col items-center">
           <div className="w-16 h-16 rounded-2xl bg-[#FAF7F2] flex items-center justify-center shadow-xl shadow-black/40 mb-3 border border-[#3D2415] overflow-hidden p-1.5">
             <img
               src="/skill-coffee-icon.png"
@@ -141,7 +141,7 @@ export default function AdminLoginPage() {
         </div>
 
         {/* Login Card */}
-        <div className="rounded-3xl bg-[#3A241A]/90 border border-[#2B1810] backdrop-blur-xl p-8 shadow-2xl relative">
+        <div className="rounded-3xl bg-[#3A241A]/90 border border-[#2B1810] backdrop-blur-xl p-5 sm:p-8 shadow-2xl relative">
           {error && (
             <div className="mb-5 p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/40 text-rose-300 text-xs font-semibold flex items-center gap-2">
               <ShieldAlert className="w-4 h-4 shrink-0" />
@@ -160,7 +160,9 @@ export default function AdminLoginPage() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Enter staff username"
-                className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
+                autoComplete="username"
+                inputMode="text"
+                className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-base text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
               />
             </div>
 
@@ -174,7 +176,9 @@ export default function AdminLoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-sm text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
+                autoComplete="current-password"
+                inputMode="text"
+                className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-base text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
               />
               <p className="text-[10px] text-stone-500 mt-1">
                 Demo mode: any username/password opens a live staff session. Type a real email for a true login.
@@ -184,7 +188,7 @@ export default function AdminLoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-[#2B1810] hover:bg-[#3D2415] active:bg-[#2A180B] text-white font-bold py-3.5 rounded-xl text-sm transition-all shadow-md mt-2 cursor-pointer border border-[#3D2415] flex items-center justify-center gap-2 disabled:opacity-70"
+              className="w-full min-h-[44px] bg-[#2B1810] hover:bg-[#3D2415] active:bg-[#2A180B] text-white font-bold py-3.5 rounded-xl text-sm transition-all shadow-md mt-2 cursor-pointer border border-[#3D2415] flex items-center justify-center gap-2 disabled:opacity-70"
             >
               {loading ? (
                 <>
@@ -198,11 +202,11 @@ export default function AdminLoginPage() {
           </form>
 
           {/* Role Buttons Quick Launch */}
-          <div className="mt-8 pt-6 border-t border-[#2B1810]">
+          <div className="mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-[#2B1810]">
             <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 text-center mb-3">
               Quick Sandbox Access
             </p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {roles.map((r) => {
                 const Icon = r.icon;
                 return (
@@ -211,13 +215,13 @@ export default function AdminLoginPage() {
                     type="button"
                     disabled={loading}
                     onClick={() => handleRoleClick(r)}
-                    className="p-2.5 rounded-xl bg-[#38210F] hover:bg-[#2B1810] border border-[#2B1810] hover:border-amber-500/50 flex flex-col items-center gap-1 transition-all text-center group cursor-pointer disabled:opacity-60"
+                    className="min-h-[44px] p-2.5 rounded-xl bg-[#38210F] hover:bg-[#2B1810] border border-[#2B1810] hover:border-amber-500/50 flex flex-col items-center justify-center gap-1 transition-all text-center group cursor-pointer disabled:opacity-60"
                   >
                     <Icon className={`w-4 h-4 ${r.color} group-hover:scale-110 transition-transform`} />
-                    <span className="text-[11px] font-bold text-stone-200 group-hover:text-white leading-tight">
+                    <span className="text-xs font-bold text-stone-200 group-hover:text-white leading-tight">
                       {r.name}
                     </span>
-                    <span className="text-[9px] text-stone-500 font-medium">
+                    <span className="text-[10px] text-stone-500 font-medium">
                       {r.desc}
                     </span>
                   </button>

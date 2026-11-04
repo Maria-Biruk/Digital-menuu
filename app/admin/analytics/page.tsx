@@ -58,6 +58,7 @@ function AdminAnalyticsContent() {
     push("Skill Coffee — Analytics Report");
     push("Period", timeframe.toUpperCase());
     push("Generated", new Date().toLocaleString());
+    push("Peak " + (timeframe === "today" ? "Hour" : timeframe === "year" ? "Month" : "Day"), stats.peakBucket);
     rows.push([]);
     push("KPI", "Value");
     push("Gross Revenue (ETB)", stats.grossRevenue);
@@ -65,9 +66,17 @@ function AdminAnalyticsContent() {
     push("Active Queue", stats.activeQueue);
     push("Avg Order Value (ETB)", stats.avgOrderValue);
     rows.push([]);
+    push("Order Volume " + (timeframe === "today" ? "By Hour" : timeframe === "year" ? "By Month" : "By Day"));
+    push("Bucket", "Orders");
+    stats.ordersSeries.forEach((d) => push(d.label, d.value));
+    rows.push([]);
     push("Revenue " + (timeframe === "today" ? "By Hour" : timeframe === "year" ? "By Month" : "By Day"));
     push("Bucket", "Revenue (ETB)");
     stats.revenueSeries.forEach((d) => push(d.label, d.value));
+    rows.push([]);
+    push("All Items Sold — Quantity & Amount");
+    push("Item", "Category", "Quantity Sold", "Amount (ETB)");
+    stats.itemSales.forEach((it) => push(it.name, it.category, it.quantity, it.revenue));
     rows.push([]);
     push("Top Sellers Today (by qty sold)");
     push("Rank", "Item", "Portions Sold", "Revenue (ETB)");
@@ -89,7 +98,7 @@ function AdminAnalyticsContent() {
     URL.revokeObjectURL(url);
   };
 
-  const currentStats = stats ?? {
+  const currentStats: Analytics = stats ?? {
     grossRevenue: 0,
     completedOrders: 0,
     activeQueue: 0,
@@ -97,6 +106,10 @@ function AdminAnalyticsContent() {
     topSellers: [],
     categoryBreakdown: [],
     revenueSeries: [],
+    ordersSeries: [],
+    categorySeries: [],
+    itemSales: [],
+    peakBucket: "—",
   };
 
   return (
@@ -158,6 +171,10 @@ function AdminAnalyticsContent() {
           topSellers={currentStats.topSellers}
           categoryBreakdown={currentStats.categoryBreakdown}
           revenueSeries={currentStats.revenueSeries}
+          ordersSeries={currentStats.ordersSeries}
+          categorySeries={currentStats.categorySeries}
+          itemSales={currentStats.itemSales}
+          peakBucket={currentStats.peakBucket}
           period={timeframe}
           loading={loading}
         />

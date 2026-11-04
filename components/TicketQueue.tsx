@@ -3,6 +3,8 @@
 import React from 'react';
 import { Clock, CheckCircle, ArrowRight, Utensils, AlertCircle } from 'lucide-react';
 import { Ticket, TicketStatus } from '../lib/types';
+import { handleImgError } from '../lib/img';
+import { orderNumber } from '../lib/order-number';
 
 interface TicketQueueProps {
   tickets: Ticket[];
@@ -45,6 +47,12 @@ export default function TicketQueue({
   title,
   className = '',
 }: TicketQueueProps) {
+  // Always present tickets in strict order of arrival (oldest first), no matter
+  // what order the fetch / realtime merge happened to return them in.
+  const sortedTickets = [...tickets].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+
   if (tickets.length === 0) {
     return (
       <div className={`text-center py-20 p-6 rounded-3xl bg-[#3A241A]/40 border border-stone-800 flex flex-col items-center justify-center ${className}`}>
@@ -63,7 +71,7 @@ export default function TicketQueue({
 
   return (
     <div className={`grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 ${className}`}>
-      {tickets.map((ticket) => {
+      {sortedTickets.map((ticket) => {
         const config = STATUS_CONFIG[ticket.status] || STATUS_CONFIG.queued;
         const isReady = ticket.status === 'ready';
 
@@ -80,11 +88,12 @@ export default function TicketQueue({
               {/* Header */}
               <div className="flex items-center justify-between pb-3 mb-3 border-b border-stone-800/60">
                 <div className="flex items-center gap-2">
-                  <span className="font-serif font-bold text-base text-white">
-                    {ticket.table_label}
+                  {/* Big order number — the primary identifier kitchen staff call out. */}
+                  <span className="font-mono text-xl font-extrabold text-amber-400 leading-none tracking-tight">
+                    #{orderNumber(ticket.order_id)}
                   </span>
-                  <span className="text-[11px] font-mono text-stone-400 bg-stone-900/80 px-2 py-0.5 rounded-md">
-                    #{ticket.order_id.replace('ord-', '')}
+                  <span className="font-serif font-bold text-sm text-stone-300 bg-stone-900/80 px-2 py-0.5 rounded-md">
+                    {ticket.table_label}
                   </span>
                 </div>
 
@@ -104,6 +113,7 @@ export default function TicketQueue({
                         <img
                           src={item.image}
                           alt={item.name}
+                          onError={handleImgError}
                           className="w-10 h-10 rounded-lg object-cover border border-stone-700/60 shrink-0"
                         />
                       ) : (

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Check, X, Eye, AlertTriangle, FileImage, ExternalLink } from 'lucide-react';
 import { Payment } from '../lib/types';
+import { orderNumber } from '../lib/order-number';
 
 interface PaymentVerificationQueueProps {
   payments: Payment[];
@@ -96,7 +97,7 @@ export default function PaymentVerificationQueue({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-bold text-sm text-white">
-                        Order #{payment.order_id.replace('ord-', '')}
+                        Order #{orderNumber(payment.order_id)}
                       </span>
                       <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
                         {payment.account_label.split(' ')[0]}
