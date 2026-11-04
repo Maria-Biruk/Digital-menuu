@@ -4,6 +4,10 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import StaffHeader from "@/components/StaffHeader";
 import TicketQueue from "@/components/TicketQueue";
+import NotificationToast from "@/components/NotificationToast";
+import { useNewArrivalNotifier } from "@/lib/notify";
+import { orderNumber } from "@/lib/order-number";
+import { handleImgError } from "@/lib/img";
 import { fetchStationTickets, subscribeTickets, setTicketStatus, setItemAvailability, fetchCatalog } from "@/lib/db";
 import { Ticket, TicketStatus, MenuItem } from "@/lib/types";
 import { signOutStaff } from "@/lib/supabase";
@@ -48,6 +52,16 @@ function KitchenConsoleContent() {
     const unsubscribe = subscribeTickets(() => void loadTickets(), "kitchen-tickets");
     return unsubscribe;
   }, [loadTickets]);
+
+  // Chime + notification when a new ticket lands on the cook line.
+  const { toast: arrivalToast, dismiss: dismissToast } = useNewArrivalNotifier(
+    tickets,
+    (t) => t.id,
+    (t) => ({
+      title: "New Kitchen Order",
+      message: `🍳 #${orderNumber(t.order_id)} · ${t.table_label}: ${t.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}`,
+    }),
+  );
 
   const handleAdvance = async (ticketId: string) => {
     const ticket = tickets.find((t) => t.id === ticketId);
@@ -125,6 +139,7 @@ function KitchenConsoleContent() {
 
   return (
     <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
+      <NotificationToast toast={arrivalToast} onDismiss={dismissToast} />
       <StaffHeader
         title="Kitchen Console"
         subtitle="Hot Station & Cook Line"
@@ -169,6 +184,7 @@ function KitchenConsoleContent() {
                     <img
                       src={item.image_path}
                       alt={item.name_i18n.en}
+                      onError={handleImgError}
                       className="w-10 h-10 rounded-lg object-cover shrink-0 border border-stone-800"
                     />
                     <div className="min-w-0">

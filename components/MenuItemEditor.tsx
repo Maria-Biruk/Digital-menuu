@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, Check, Utensils, Wine } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { X, Check, Utensils, Wine, AlertCircle, ImageOff, UploadCloud, Trash2 } from 'lucide-react';
 import { MenuItem, Category, Lang, Station } from '../lib/types';
 import { CATEGORIES } from '../lib/mock';
+import { handleImgError } from '../lib/img';
 
 interface MenuItemEditorProps {
   initialItem?: MenuItem | null;
@@ -11,6 +12,9 @@ interface MenuItemEditorProps {
   onSave: (item: MenuItem) => void;
   onCancel: () => void;
   className?: string;
+  /** Save failures are rendered inside the form (the page toast would sit
+   *  behind this full-screen overlay and be invisible to the admin). */
+  saveError?: string | null;
 }
 
 const DIETARY_OPTIONS = [
@@ -27,6 +31,7 @@ export default function MenuItemEditor({
   onSave,
   onCancel,
   className = '',
+  saveError = null,
 }: MenuItemEditorProps) {
   const [activeLangTab, setActiveLangTab] = useState<Lang>('en');
 
@@ -43,9 +48,61 @@ export default function MenuItemEditor({
   const [price, setPrice] = useState(initialItem?.price ? String(initialItem.price) : '250');
   const [station, setStation] = useState<Station>(initialItem?.station || 'kitchen');
   const [avgPrepMinutes, setAvgPrepMinutes] = useState(initialItem?.avg_prep_minutes ? String(initialItem.avg_prep_minutes) : '15');
-  const [imagePath, setImagePath] = useState(
-    initialItem?.image_path || 'https://images.unsplash.com/photo-1544025162-d76694265947?w=800'
-  );
+  const [imagePath, setImagePath] = useState(initialItem?.image_path || '');
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+
+  // Pick a photo from files / gallery / camera, then downscale + compress it
+  // in the browser and store it inline (data URL) — no external link needed
+  // and small enough to keep the DB row light while still looking crisp on
+  // menu cards and kitchen tickets.
+  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setImageError('Please choose an image file (JPG or PNG).');
+      return;
+    }
+    setImageError(null);
+    setImageBusy(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onload = () => {
+        const MAX = 900; // longest edge in px
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          setImageBusy(false);
+          setImageError('Could not process the image on this device.');
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setImagePath(canvas.toDataURL('image/jpeg', 0.82));
+        setImageBusy(false);
+      };
+      img.onerror = () => {
+        setImageBusy(false);
+        setImageError('That file is not a readable image.');
+      };
+      img.src = String(reader.result);
+    };
+    reader.onerror = () => {
+      setImageBusy(false);
+      setImageError('Could not read the selected file.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const clearImage = () => {
+    setImagePath('');
+    setImageError(null);
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  };
   const [dietaryTags, setDietaryTags] = useState<string[]>(initialItem?.dietary_tags || []);
   const [isAvailable, setIsAvailable] = useState<boolean>(initialItem?.is_available ?? true);
 
@@ -59,6 +116,9 @@ export default function MenuItemEditor({
     e.preventDefault();
 
     const updated: MenuItem = {
+      // Keep fields the form does not expose (ingredients, calories, rating,
+      // tag, sort_order…) so editing a dish never wipes them in the DB.
+      ...(initialItem ?? {}),
       id: initialItem?.id || `m-${Date.now()}`,
       category_id: categoryId,
       name_i18n: {
@@ -105,6 +165,14 @@ export default function MenuItemEditor({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Inline save error — always visible on the form itself */}
+        {saveError && (
+          <div className="p-3.5 rounded-xl bg-rose-950/70 border border-rose-700/60 text-rose-200 text-xs font-medium flex items-start gap-2 animate-fadeIn">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{saveError}</span>
+          </div>
+        )}
+
         {/* Multilingual Tabs */}
         <div className="space-y-3 p-4 rounded-2xl bg-[#3A241A] border border-stone-800/80">
           <div className="flex items-center justify-between">
@@ -301,17 +369,65 @@ export default function MenuItemEditor({
           </div>
         </div>
 
-        {/* Image URL */}
+        {/* Dish photo — pick from gallery / files / camera (no links) */}
         <div>
           <label className="block text-xs font-semibold text-stone-400 mb-1.5">
-            Dish Image URL (Unsplash or CDN)
+            Dish Photo (from Gallery or Camera)
           </label>
           <input
-            type="url"
-            value={imagePath}
-            onChange={(e) => setImagePath(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-800 bg-[#3A241A] text-white text-xs focus:outline-none focus:border-[#2B1810]"
+            ref={imageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageFile}
           />
+          <div className="flex items-center gap-3">
+            <div className="w-24 h-24 rounded-xl overflow-hidden border border-stone-800 bg-[#38210F] flex items-center justify-center shrink-0">
+              {imagePath.trim() ? (
+                <img
+                  key={imagePath.slice(-24)}
+                  src={imagePath}
+                  alt="Dish preview"
+                  onError={handleImgError}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <ImageOff className="w-7 h-7 text-stone-600" />
+              )}
+            </div>
+            <div className="space-y-2 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={imageBusy}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#2B1810] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                >
+                  <UploadCloud size={14} />
+                  <span>{imageBusy ? 'Processing…' : imagePath.trim() ? 'Change Photo' : 'Upload Photo'}</span>
+                </button>
+                {imagePath.trim() && (
+                  <button
+                    type="button"
+                    onClick={clearImage}
+                    className="px-3 py-2 rounded-xl border border-stone-700 text-stone-300 hover:text-rose-400 hover:border-rose-500/50 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Trash2 size={13} />
+                    <span>Remove</span>
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-stone-500 leading-relaxed">
+                Choose from your phone gallery or take a picture — it is resized
+                automatically and shown to guests and on kitchen tickets.
+              </p>
+              {imageError && (
+                <p className="text-[11px] text-rose-400 font-semibold flex items-center gap-1">
+                  <AlertCircle size={12} className="shrink-0" /> {imageError}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Dietary Tags Checkboxes */}

@@ -13,6 +13,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { setTicketStatus } from '../lib/db';
+import { orderNumber } from '../lib/order-number';
 import type { Ticket, TicketStatus } from '../lib/types';
 
 interface ApprovedOrderModalProps {
@@ -115,7 +116,7 @@ export default function ApprovedOrderModal({
                 Payment Approved
               </h3>
               <p className="text-[11px] text-stone-400 font-mono">
-                Order #{orderId.replace('ord-', '').slice(0, 8).toUpperCase()}
+                Order #{orderNumber(orderId)}
               </p>
             </div>
           </div>

@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Armchair,
   Pencil,
+  X,
 } from "lucide-react";
 import PaymentAccountPicker from "@/components/PaymentAccountPicker";
 import ProofUpload from "@/components/ProofUpload";
@@ -22,6 +23,8 @@ import CallWaiterButton from "@/components/CallWaiterButton";
 import TableSelector from "@/components/TableSelector";
 import { supabaseBrowser } from "@/lib/supabase";
 import { fetchPaymentAccounts, fetchTables, setOrderTable } from "@/lib/db";
+import { pushNotification, playChime } from "@/lib/notify";
+import { orderNumber } from "@/lib/order-number";
 import type { OrderStatus, PaymentAccount, Table } from "@/lib/types";
 
 // Fields read from the `orders` row follow the real Postgres columns:
@@ -58,6 +61,13 @@ const ORDER_RANK: Record<OrderStatus, number> = {
   cancelled: -1,
 };
 
+// Friendly diner-facing copy for each live status change (notification + toast).
+const STATUS_ALERTS: Record<string, { title: string; text: string }> = {
+  preparing: { title: "Skill Coffee", text: "🔥 Your order is now being prepared!" },
+  ready: { title: "Skill Coffee", text: "🔔 Your order is ready for service!" },
+  served: { title: "Skill Coffee", text: "✅ Your order has been served. Enjoy!" },
+};
+
 export default function OrderStatusPage() {
   const params = useParams();
   const router = useRouter();
@@ -91,6 +101,9 @@ export default function OrderStatusPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedProof, setSubmittedProof] = useState(false);
+
+  // Live status-change alerts (toast banner + browser notification).
+  const [statusToast, setStatusToast] = useState<string | null>(null);
 
   const loadOrder = useCallback(async () => {
     if (!orderId) return;
@@ -220,7 +233,9 @@ export default function OrderStatusPage() {
     order?.payment_status === "paid" ||
     (order?.status != null && order.status !== "received");
 
-  const paymentConfirmed = order?.payment_status === "paid" || isActive;
+  // The tracker's "Payment Confirmed / Sent to Kitchen" step only lights up
+  // when the cashier actually approved the payment — not merely on proof upload.
+  const paymentApproved = order?.payment_status === "paid";
 
   // Effective status for the tracker: the furthest step reached by either the
   // order row or any of its station tickets (kitchen/bar "Start Preparing").
@@ -245,6 +260,33 @@ export default function OrderStatusPage() {
   const hasBar = ticketStations.some((s) => /bar/i.test(s));
   const orderKind: "food" | "drink" | "mixed" | undefined =
     hasKitchen && hasBar ? "mixed" : hasBar ? "drink" : hasKitchen ? "food" : undefined;
+
+  // Notify the diner the moment their order moves (preparing → ready → served,
+  // or payment approval). Skips the very first snapshot after page load.
+  const prevStageRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!order) return;
+    const stage = `${paymentApproved ? "paid" : "unpaid"}:${effectiveStatus}`;
+    if (prevStageRef.current === null) {
+      prevStageRef.current = stage;
+      return;
+    }
+    if (prevStageRef.current === stage) return;
+    prevStageRef.current = stage;
+
+    let text: string | null = null;
+    if (paymentApproved && stage.startsWith("paid")) {
+      text = "💳 Payment confirmed — order sent to the kitchen!";
+    } else {
+      text = STATUS_ALERTS[effectiveStatus]?.text ?? null;
+    }
+    if (text) {
+      playChime();
+      pushNotification("Skill Coffee", text);
+      setStatusToast(text);
+      setTimeout(() => setStatusToast(null), 8000);
+    }
+  }, [order, paymentApproved, effectiveStatus]);
 
   const handleSubmitProof = async () => {
     if (!uploadedFile || !orderId || !userId || !selectedAccountId) return;
@@ -320,7 +362,7 @@ export default function OrderStatusPage() {
             <div className="text-left">
               <h1 className="font-serif font-bold text-sm tracking-wide">Skill Coffee</h1>
               <p className="text-[10px] text-amber-300 font-mono">
-                Order #{orderId.slice(-6).toUpperCase()}
+                Order #{orderNumber(orderId)}
               </p>
             </div>
           </div>
@@ -374,12 +416,12 @@ export default function OrderStatusPage() {
                 <div className="text-right">
                   <span
                     className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full ${
-                      paymentConfirmed
+                      paymentApproved
                         ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
                         : "bg-amber-100 text-amber-800 border border-amber-300"
                     }`}
                   >
-                    {paymentConfirmed ? (
+                    {paymentApproved ? (
                       <>
                         <CheckCircle2 className="w-3.5 h-3.5" /> Confirmed
                       </>
@@ -434,9 +476,50 @@ export default function OrderStatusPage() {
               )}
             </div>
 
-            {/* STATE 1: AWAITING PAYMENT / VERIFICATION */}
+            {/* LIVE ORDER TRACKER — always visible so tracking never dumps the
+                diner back into the payment form as the headline section. */}
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-stone-200/80 space-y-4">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                <h3 className="font-serif font-bold text-base text-stone-900">
+                  Live Order Tracker
+                </h3>
+                <div className="flex items-center gap-2">
+                  {/* Same number the kitchen/bar/floor screens show for this order. */}
+                  <span className="font-mono text-sm font-extrabold text-amber-700 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                    #{orderNumber(orderId)}
+                  </span>
+                  <span className="text-xs text-stone-400">Updates live</span>
+                </div>
+              </div>
+
+              {effectiveStatus === "cancelled" ? (
+                <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-4 text-xs flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>This order was cancelled. Please place a new order from the menu.</span>
+                </div>
+              ) : (
+                <OrderStatusTracker
+                  currentStatus={effectiveStatus}
+                  paymentConfirmed={paymentApproved}
+                  orderKind={orderKind}
+                />
+              )}
+
+              <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs text-stone-500">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="font-semibold text-stone-700">Kitchen &amp; Bar Station</span>
+                </div>
+                <span className="text-[11px] text-stone-400">Synced in real-time</span>
+              </div>
+            </div>
+
+            {/* STATE 1: AWAITING PAYMENT / VERIFICATION (secondary, below tracker) */}
             {!isActive && (
               <div className="space-y-6 animate-fadeIn">
+                <h3 className="font-serif font-bold text-base text-stone-900">
+                  Complete Your Payment
+                </h3>
                 <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                   <div className="text-xs text-amber-900 leading-relaxed">
@@ -506,7 +589,7 @@ export default function OrderStatusPage() {
                   <div className="absolute -top-12 -right-12 w-28 h-28 bg-amber-100/60 rounded-full blur-xl pointer-events-none" />
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3 border border-emerald-200">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    {paymentConfirmed ? "Verified & Active" : "Receipt Submitted"}
+                    {paymentApproved ? "Verified & Active" : "Receipt Submitted"}
                   </div>
 
                   <p className="text-xs font-semibold uppercase tracking-widest text-stone-500 mb-1">
@@ -523,26 +606,6 @@ export default function OrderStatusPage() {
                     Provide this 4-digit code to your waiter or show it at the pickup station
                     when collecting your food.
                   </p>
-                </div>
-
-                {/* Live Status Tracker */}
-                <div className="bg-white rounded-3xl p-6 shadow-sm border border-stone-200/80 space-y-4">
-                  <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-                    <h3 className="font-serif font-bold text-base text-stone-900">
-                      Live Kitchen Tracker
-                    </h3>
-                    <span className="text-xs text-stone-400">Updates live</span>
-                  </div>
-
-                  <OrderStatusTracker currentStatus={effectiveStatus} orderKind={orderKind} />
-
-                  <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs text-stone-500">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="font-semibold text-stone-700">Kitchen & Bar Station</span>
-                    </div>
-                    <span className="text-[11px] text-stone-400">Synced in real-time</span>
-                  </div>
                 </div>
 
                 {/* Need Assistance */}
@@ -627,6 +690,25 @@ export default function OrderStatusPage() {
           </>
         )}
       </main>
+
+      {/* Live status-change toast (preparing → ready → served, payment approval) */}
+      {statusToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] w-[calc(100vw-2rem)] max-w-sm animate-fadeIn">
+          <div className="p-4 rounded-2xl bg-[#2B1810] border border-amber-500/50 shadow-2xl flex items-start gap-3">
+            <p className="text-xs font-semibold text-amber-50 leading-relaxed flex-1">
+              {statusToast}
+            </p>
+            <button
+              type="button"
+              onClick={() => setStatusToast(null)}
+              aria-label="Dismiss notification"
+              className="p-1 rounded-lg text-stone-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Floating Call Waiter button — wired to rpc("call_waiter") */}
       {!isTakeaway && order?.table_id && (

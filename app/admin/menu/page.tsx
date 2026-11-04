@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import AdminHeader from "@/components/AdminHeader";
 import MenuItemEditor from "@/components/MenuItemEditor";
+import { handleImgError } from "@/lib/img";
 import { fetchCatalog, subscribeMenu, setItemAvailability, saveMenuItem, deleteMenuItem } from "@/lib/db";
 import { MenuItem, Category } from "@/lib/types";
 import {
@@ -36,6 +37,9 @@ function AdminMenuContent() {
   const [selectedStation, setSelectedStation] = useState<string>("all");
   const [editorItem, setEditorItem] = useState<MenuItem | null | "new">(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Save failures go inside the editor form — the page toast renders behind
+  // the full-screen overlay and is invisible while the editor is open.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -82,13 +86,14 @@ function AdminMenuContent() {
   };
 
   const handleSaveItem = async (savedItem: MenuItem) => {
+    setSaveError(null);
     try {
       await saveMenuItem(savedItem as unknown as Record<string, unknown>, editorItem === "new" ? undefined : savedItem.id);
       await load();
       showToast(editorItem === "new" ? `Added "${savedItem.name_i18n.en}" to menu.` : `Updated "${savedItem.name_i18n.en}".`);
       setEditorItem(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to save item");
+      setSaveError(err instanceof Error ? err.message : "Failed to save item — please keep the form open and try again.");
     }
   };
 
@@ -206,6 +211,7 @@ function AdminMenuContent() {
                             <img
                               src={item.image_path}
                               alt={item.name_i18n.en}
+                              onError={handleImgError}
                               className="w-12 h-12 rounded-xl object-cover border border-[#2B1810] shrink-0"
                             />
                             <div>
@@ -311,7 +317,10 @@ function AdminMenuContent() {
       {editorItem !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
           <div
-            onClick={() => setEditorItem(null)}
+            onClick={() => {
+              setEditorItem(null);
+              setSaveError(null);
+            }}
             className="absolute inset-0 bg-black/85 backdrop-blur-md"
           />
           <div className="relative z-10 w-full max-w-2xl max-h-[92vh] overflow-y-auto animate-scale-up">
@@ -319,7 +328,11 @@ function AdminMenuContent() {
               initialItem={editorItem === "new" ? null : editorItem}
               categories={categories}
               onSave={handleSaveItem}
-              onCancel={() => setEditorItem(null)}
+              saveError={saveError}
+              onCancel={() => {
+                setEditorItem(null);
+                setSaveError(null);
+              }}
             />
           </div>
         </div>
