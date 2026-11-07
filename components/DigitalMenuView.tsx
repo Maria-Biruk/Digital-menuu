@@ -26,6 +26,8 @@ import {
   SlidersHorizontal,
   UtensilsCrossed,
   ListChecks,
+  Mail,
+  MapPin,
 } from 'lucide-react';
 import { Lang, ServiceMode, MenuItem, FulfillmentType, Category, Table } from '../lib/types';
 import { SLUG, tI18n } from '../lib/mock';
@@ -36,17 +38,24 @@ import CallWaiterButton from './CallWaiterButton';
 import Cart, { CartLine } from './Cart';
 import { handleImgError } from '../lib/img';
 import TogetherOrSeparatePrompt from './TogetherOrSeparatePrompt';
+import ArrivalTablePrompt from './ArrivalTablePrompt';
 
 interface DigitalMenuViewProps {
   tableId?: string;
   slug?: string;
   initialLang?: Lang;
+  /**
+   * True when the diner opened the menu via a direct link (no QR table id).
+   * Prompts them to pick their table on arrival so orders route correctly.
+   */
+  askTableOnArrival?: boolean;
 }
 
 export default function DigitalMenuView({
   tableId = 't1',
   slug = SLUG,
   initialLang = 'en',
+  askTableOnArrival = false,
 }: DigitalMenuViewProps) {
   const router = useRouter();
 
@@ -103,10 +112,6 @@ export default function DigitalMenuView({
     }
   };
 
-  // Table label resolution
-  const tableDisplay =
-    tableId === 'takeaway' ? 'Takeaway Order' : `Table ${tableId.toUpperCase()}`;
-
   // Real catalog loaded from Supabase (lib/db.fetchCatalog)
   const [MENU, setMenu] = useState<MenuItem[]>([]);
   const [CATEGORIES, setCategories] = useState<Category[]>([]);
@@ -114,6 +119,23 @@ export default function DigitalMenuView({
   const [tables, setTables] = useState<Table[]>([]);
   const [placing, setPlacing] = useState(false);
   const [placeError, setPlaceError] = useState<string | null>(null);
+
+  // Dine-in table resolution. QR links carry a real table id; direct links
+  // arrive with a placeholder and must ask the guest which table they're at.
+  const [chosenTableId, setChosenTableId] = useState<string | null>(null);
+  const [showArrivalPrompt, setShowArrivalPrompt] = useState(askTableOnArrival);
+  const chosenTable = tables.find((t) => t.id === chosenTableId) ?? null;
+  // Effective table id used everywhere a real restaurant_tables id is needed.
+  const effTableId = chosenTableId ?? tableId;
+  const dineInTableId = chosenTable?.id ?? tables[0]?.id ?? null;
+
+  // Table label resolution (uses the chosen table's real label when known)
+  const tableDisplay =
+    effTableId === 'takeaway'
+      ? 'Takeaway Order'
+      : chosenTable?.label != null
+        ? `Table ${chosenTable.label}`
+        : `Table ${String(effTableId).toUpperCase()}`;
 
   useEffect(() => {
     let active = true;
@@ -136,10 +158,41 @@ export default function DigitalMenuView({
     };
   }, []);
 
+  // Resolve the dine-in table once the list is loaded.
+  //  • QR link: tableId is already a real restaurant_tables id → adopt it.
+  //  • Direct link: honor a previous pick, otherwise the arrival prompt stays
+  //    open until the guest chooses a table.
+  useEffect(() => {
+    if (!tables.length) return;
+    if (!askTableOnArrival) {
+      if (tables.some((t) => t.id === tableId)) setChosenTableId(tableId);
+      return;
+    }
+    try {
+      const saved = sessionStorage.getItem(`dm_table_${slug}`);
+      if (saved && tables.some((t) => t.id === saved)) {
+        setChosenTableId(saved);
+        setShowArrivalPrompt(false);
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, [tables, askTableOnArrival, tableId, slug]);
+
+  const pickArrivalTable = (id: string) => {
+    setChosenTableId(id);
+    setShowArrivalPrompt(false);
+    try {
+      sessionStorage.setItem(`dm_table_${slug}`, id);
+    } catch {
+      /* storage unavailable */
+    }
+  };
+
   // Persist the cart and the last-placed order per table, so a page reload or
   // navigating back never loses the diner's basket or their order-status link.
-  const cartKey = `dm_cart_${slug}_${tableId}`;
-  const orderKey = `dm_active_order_${slug}_${tableId}`;
+  const cartKey = `dm_cart_${slug}_${effTableId}`;
+  const orderKey = `dm_active_order_${slug}_${effTableId}`;
 
   useEffect(() => {
     try {
@@ -186,17 +239,6 @@ export default function DigitalMenuView({
       return matchCat && matchSearch && matchDietary;
     });
   }, [MENU, activeCategory, searchQuery, selectedDietary, lang]);
-
-  // Featured Categories & Milkshakes for Top Showcase
-  const topCoffeeItems = useMemo(() => {
-    const id = catIdBySlug['coffee-drinks'];
-    return id ? MENU.filter((m) => m.category_id === id).slice(0, 4) : [];
-  }, [MENU, catIdBySlug]);
-
-  const topMilkshakeItems = useMemo(() => {
-    const id = catIdBySlug['milkshakes'];
-    return id ? MENU.filter((m) => m.category_id === id).slice(0, 4) : [];
-  }, [MENU, catIdBySlug]);
 
   // Cart operations
   const addToCart = (itemId: string, qty: number = 1, instructions?: string) => {
@@ -247,7 +289,7 @@ export default function DigitalMenuView({
     .filter(Boolean) as { itemId: string; qty: number; instructions?: string; item: MenuItem }[];
 
   const subtotal = cartItems.reduce((s, cur) => s + cur.item.price * cur.qty, 0);
-  const grandTotal = subtotal + Math.round(subtotal * 0.15) + (cartLines.length > 0 ? 25 : 0);
+  const grandTotal = subtotal + (cartLines.length > 0 ? 25 : 0);
 
   const hasFood = cartItems.some((ci) => ci.item.station === 'kitchen');
   const hasDrink = cartItems.some((ci) => ci.item.station === 'bar');
@@ -258,8 +300,8 @@ export default function DigitalMenuView({
     setPlaceError(null);
     try {
       await ensureDinerSession();
-      const isTakeawayOrder = tableId === 'takeaway';
-      if (!isTakeawayOrder && !tables[0]?.id) throw new Error('No table available for dine-in');
+      const isTakeawayOrder = effTableId === 'takeaway';
+      if (!isTakeawayOrder && !dineInTableId) throw new Error('No table available for dine-in');
       const p_items = cartItems.map((ci) => ({ menu_item_id: ci.itemId, quantity: ci.qty }));
       const notesList = cartItems
         .filter((ci) => ci.instructions && ci.instructions.trim())
@@ -269,7 +311,7 @@ export default function DigitalMenuView({
 
       const { data, error } = await supabaseBrowser().rpc('create_order', {
         p_fulfillment: isTakeawayOrder ? 'takeaway' : 'dine_in',
-        p_table_id: isTakeawayOrder ? null : (tables[0]?.id ?? null),
+        p_table_id: isTakeawayOrder ? null : dineInTableId,
         p_phone: null,
         p_items,
         p_service_mode,
@@ -286,7 +328,7 @@ export default function DigitalMenuView({
       }
       setActiveOrderId(newOrderId);
       setCartLines([]);
-      router.push(`/${slug}/order/${newOrderId}?table=${tableId}&lang=${lang}`);
+      router.push(`/${slug}/order/${newOrderId}?table=${effTableId}&lang=${lang}`);
     } catch (err) {
       setPlaceError(err instanceof Error ? err.message : String(err));
       setPlacing(false);
@@ -309,11 +351,11 @@ export default function DigitalMenuView({
     setPlaceError(null);
     try {
       await ensureDinerSession();
-      const isTakeawayOrder = modalFulfillment === 'takeaway' || tableId === 'takeaway';
-      if (!isTakeawayOrder && !tables[0]?.id) throw new Error('No table available for dine-in');
+      const isTakeawayOrder = modalFulfillment === 'takeaway' || effTableId === 'takeaway';
+      if (!isTakeawayOrder && !dineInTableId) throw new Error('No table available for dine-in');
       const { data, error } = await supabaseBrowser().rpc('create_order', {
         p_fulfillment: isTakeawayOrder ? 'takeaway' : 'dine_in',
-        p_table_id: isTakeawayOrder ? null : (tables[0]?.id ?? null),
+        p_table_id: isTakeawayOrder ? null : dineInTableId,
         p_phone: modalPhone.trim() || null,
         p_items: [{ menu_item_id: dish.id, quantity: modalQty }],
         p_service_mode: 'not_applicable',
@@ -331,7 +373,7 @@ export default function DigitalMenuView({
       setSelectedDish(null);
       const cleanPhone = encodeURIComponent(modalPhone.trim() || '');
       router.push(
-        `/${slug}/order/${newOrderId}?table=${isTakeawayOrder ? 'takeaway' : tableId}&lang=${lang}&phone=${cleanPhone}`,
+        `/${slug}/order/${newOrderId}?table=${isTakeawayOrder ? 'takeaway' : effTableId}&lang=${lang}&phone=${cleanPhone}`,
       );
     } catch (err) {
       setPlaceError(err instanceof Error ? err.message : String(err));
@@ -339,31 +381,17 @@ export default function DigitalMenuView({
     }
   };
 
-  const scrollToMenu = (categorySlug?: string) => {
-    if (categorySlug) setActiveCategory(catIdBySlug[categorySlug] ?? 'all');
-    document.getElementById('menu-section')?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   const footerContact = (kind: 'call' | 'email') => {
     if (kind === 'call') window.location.href = 'tel:+251911234567';
     else window.location.href = 'mailto:hello@skillcoffee.et?subject=Skill%20Coffee%20 enquiry';
   };
 
-  // Open a dish from the footer "Products" shortcuts via fuzzy name match.
-  const openProductByName = (fragments: string[]) => {
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, '');
-    const hit = MENU.find((m) => {
-      const n = norm(tI18n(m.name_i18n, 'en'));
-      return fragments.every((f) => n.includes(f));
-    });
-    if (hit) {
-      openDishDetail(hit);
-      return;
-    }
-    setSearchQuery(fragments[0]);
-    setActiveCategory('all');
-    document.getElementById('menu-section')?.scrollIntoView({ behavior: 'smooth' });
-  };
+  // Compact footer action chip styling (light/dark aware).
+  const footerChip = `px-3.5 py-1.5 rounded-full text-[11px] font-semibold flex items-center gap-1.5 transition-colors ${
+    isDarkMode
+      ? 'bg-white/5 hover:bg-white/10 text-stone-300 border border-white/10'
+      : 'bg-white hover:bg-stone-50 text-stone-700 border border-stone-200'
+  }`;
 
   return (
     <div
@@ -373,6 +401,15 @@ export default function DigitalMenuView({
           : 'app-bg-light text-[#2B1810]'
       }`}
     >
+      {/* Arrival table prompt (direct-link diners who skipped the QR) */}
+      <ArrivalTablePrompt
+        open={showArrivalPrompt && !chosenTableId}
+        tables={tables}
+        lang={lang}
+        onPick={pickArrivalTable}
+        onSkip={() => setShowArrivalPrompt(false)}
+      />
+
       {/* Toast Notification */}
       {addedItemNotification && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
@@ -569,155 +606,6 @@ export default function DigitalMenuView({
                 <span>Call to Reserve</span>
               </button>
             </div>
-          </div>
-        </section>
-
-        {/* ========================================================= */}
-        {/* FRESHLY ROASTED COFFEE BANNER (From Photo 2) */}
-        {/* ========================================================= */}
-        <section
-          className={`relative overflow-hidden rounded-3xl p-6 sm:p-8 border transition-all ${
-            isDarkMode
-              ? 'bg-gradient-to-r from-[#29170e] via-[#3d2315] to-[#3A241A] border-[#4a2a19] shadow-xl'
-              : 'bg-gradient-to-r from-[#C8956C]/30 via-[#D4A574]/20 to-[#C8956C]/30 border-[#D4B896] shadow-sm'
-          }`}
-        >
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="space-y-2 text-center md:text-left">
-              <span className="text-[11px] font-extrabold uppercase tracking-widest text-amber-700 dark:text-amber-400">
-                Freshly Roasted
-              </span>
-              <h3 className="font-serif text-2xl sm:text-4xl font-bold tracking-tight text-[#2B1810] dark:text-[#f7e6d2]">
-                COFFEE & ARTISAN ROASTS
-              </h3>
-              <p className="text-xs sm:text-sm text-stone-600 dark:text-[#bda490] max-w-md">
-                Hand-selected Yirgacheffe and Sidama Arabica beans roasted daily on site. Smooth crema, rich body.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <a
-                href="#menu-section"
-                onClick={() => setActiveCategory('cat-coffee-drinks')}
-                className="px-6 py-3 rounded-full bg-[#2B1810] hover:bg-[#3D2415] text-white dark:bg-amber-500 dark:hover:bg-amber-400 dark:text-stone-950 font-serif font-bold text-xs sm:text-sm shadow-lg active:scale-95 transition-transform"
-              >
-                Shop Now
-              </a>
-            </div>
-          </div>
-        </section>
-
-        {/* ========================================================= */}
-        {/* TOP CATEGORIES / DRINKS (From Photo 2) */}
-        {/* ========================================================= */}
-        <section className="space-y-4">
-          <div className="text-center space-y-1">
-            <h3 className="font-serif text-sm sm:text-base font-bold uppercase tracking-widest text-[#2B1810] dark:text-[#E2A66C]">
-              TOP CATEGORIES
-            </h3>
-            <p className="text-[11px] sm:text-xs text-stone-500 dark:text-[#b89e8b]">
-              Explore The Recent Most Bought Drinks This Week
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            {topCoffeeItems.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => openDishDetail(item)}
-                className={`group relative overflow-hidden rounded-2xl cursor-pointer transition-all duration-300 hover:scale-[1.02] border ${
-                  isDarkMode
-                    ? 'bg-[#3A241A] border-[#442618] shadow-md shadow-black/40 hover:border-amber-500/50'
-                    : 'bg-[#FAF5EC] border-[#D4B896] shadow-sm hover:shadow-md hover:border-amber-600/40'
-                }`}
-              >
-                <div className="relative aspect-[4/3] w-full overflow-hidden bg-stone-100 dark:bg-stone-900">
-                  <img
-                    src={item.image_path}
-                    onError={handleImgError}
-                    alt={tI18n(item.name_i18n, lang)}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                  <div className="absolute bottom-2.5 inset-x-2.5 text-center">
-                    <p className="font-serif text-xs sm:text-sm font-bold text-white tracking-wide truncate">
-                      {tI18n(item.name_i18n, lang)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ========================================================= */}
-        {/* TOP MILK SHAKES (From Photo 2) */}
-        {/* ========================================================= */}
-        <section className="space-y-4">
-          <div className="text-center space-y-1">
-            <h3 className="font-serif text-sm sm:text-base font-bold uppercase tracking-widest text-[#2B1810] dark:text-[#E2A66C]">
-              TOP MILK SHAKES
-            </h3>
-            <p className="text-[11px] sm:text-xs text-stone-500 dark:text-[#b89e8b]">
-              Explore The Recent Most Bought Shakes This Week
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            {topMilkshakeItems.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => openDishDetail(item)}
-                className={`group relative overflow-hidden rounded-3xl p-3 flex flex-col justify-between cursor-pointer transition-all duration-300 hover:scale-[1.02] border ${
-                  isDarkMode
-                    ? 'bg-[#3A241A] border-[#442417] shadow-lg shadow-black/40 hover:border-amber-500/50'
-                    : 'bg-[#FAF5EC] border-[#D4B896] shadow-sm hover:shadow-md hover:border-amber-600/40'
-                }`}
-              >
-                {/* Image */}
-                <div className="relative aspect-square w-full rounded-2xl overflow-hidden bg-stone-100 dark:bg-stone-900 mb-2.5">
-                  <img
-                    src={item.image_path}
-                    onError={handleImgError}
-                    alt={tI18n(item.name_i18n, lang)}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-
-                  <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md bg-amber-500 text-stone-950 text-[9px] font-extrabold uppercase">
-                    {item.avg_prep_minutes}m
-                  </div>
-                </div>
-
-                {/* Shake Title */}
-                <div className="text-center py-1">
-                  <h4 className="font-serif text-xs sm:text-sm font-bold text-[#2B1810] dark:text-[#f8ede1] leading-tight truncate">
-                    {tI18n(item.name_i18n, lang)}
-                  </h4>
-                </div>
-
-                {/* Price and Buy Now Pill Button (From Photo 2) */}
-                <div className="flex items-center justify-between gap-1.5 pt-2 border-t border-stone-100 dark:border-stone-800/80">
-                  <span className="px-2 py-1 rounded-lg bg-stone-100 dark:bg-[#3A241A] text-[10px] sm:text-xs font-bold text-stone-800 dark:text-stone-300 border border-stone-200 dark:border-stone-800">
-                    {item.price} ETB
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openDishDetail(item);
-                    }}
-                    className={`px-3 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
-                      isDarkMode
-                        ? 'bg-white/10 hover:bg-white/20 text-white border border-white/10 backdrop-blur-md'
-                        : 'bg-[#2B1810] hover:bg-[#3D2415] text-white shadow-sm'
-                    }`}
-                  >
-                    Buy Now
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
         </section>
 
@@ -1405,147 +1293,90 @@ export default function DigitalMenuView({
       )}
 
       {/* ========================================================= */}
-      {/* COFFEEHOUSE FOOTER (From Photo 2) */}
+      {/* FOOTER — slim, modern single band */}
       {/* ========================================================= */}
-      <footer className="mt-20 border-t bg-[#3A241A] text-[#E8DFD8] border-[#3D2415]">
-        <div className="max-w-7xl mx-auto px-6 sm:px-8 py-12 space-y-10">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {/* Products Column — opens the real dish detail */}
-            <div className="space-y-3">
-              <h5 className="font-serif text-sm font-bold uppercase tracking-wider text-white">
-                Products
-              </h5>
-              <ul className="text-xs space-y-2 opacity-80">
-                {[
-                  { label: 'Mocha Coffee', parts: ['mocha'] },
-                  { label: 'Espresso Coffee', parts: ['espresso'] },
-                  { label: 'Biscoff Milkshakes', parts: ['biscoff'] },
-                  { label: 'Doro Wat Platter', parts: ['doro'] },
-                  { label: 'Beyaynetu Feast', parts: ['beyaynet'] },
-                  { label: 'Cheeseburger', parts: ['cheese', 'burger'] },
-                ].map((p) => (
-                  <li key={p.label}>
-                    <button
-                      type="button"
-                      onClick={() => openProductByName(p.parts)}
-                      className="hover:text-amber-300 transition-colors cursor-pointer text-left"
-                    >
-                      {p.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Category Column — real filters into the menu grid */}
-            <div className="space-y-3">
-              <h5 className="font-serif text-sm font-bold uppercase tracking-wider text-white">
-                Category
-              </h5>
-              <ul className="text-xs space-y-2 opacity-80">
-                {CATEGORIES.slice(0, 6).map((c) => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      onClick={() => scrollToMenu(c.slug)}
-                      className="hover:text-amber-300 transition-colors cursor-pointer text-left"
-                    >
-                      {tI18n(c.name_i18n, lang)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Company Info Column — working contact actions */}
-            <div className="space-y-3">
-              <h5 className="font-serif text-sm font-bold uppercase tracking-wider text-white">
-                Company Info
-              </h5>
-              <ul className="text-xs space-y-2 opacity-80">
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                    className="hover:text-amber-300 transition-colors cursor-pointer text-left"
-                  >
-                    About Skill Coffee
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => scrollToMenu('coffee-drinks')}
-                    className="hover:text-amber-300 transition-colors cursor-pointer text-left"
-                  >
-                    Skill Coffee Roastery
-                  </button>
-                </li>
-                <li>
-                  <button type="button" onClick={() => footerContact('call')} className="hover:text-amber-300 transition-colors cursor-pointer text-left">
-                    Table Reservations
-                  </button>
-                </li>
-                <li>
-                  <a href="https://maps.google.com/?q=Skill+Coffee+Addis+Ababa" target="_blank" rel="noopener noreferrer" className="hover:text-amber-300 transition-colors">
-                    Contact &amp; Location
-                  </a>
-                </li>
-                <li>
-                  <button type="button" onClick={() => footerContact('email')} className="hover:text-amber-300 transition-colors cursor-pointer text-left">
-                    Customer Support
-                  </button>
-                </li>
-              </ul>
-            </div>
-
-            {/* Follow Us Column */}
-            <div className="space-y-3">
-              <h5 className="font-serif text-sm font-bold uppercase tracking-wider text-white">
-                Follow Us
-              </h5>
-              <p className="text-xs opacity-75">
-                Join our coffee lovers community in Addis Ababa:
-              </p>
-              <div className="flex items-center gap-3 pt-1">
-                <a
-                  href="https://www.instagram.com/skillcofee" target="_blank" rel="noopener noreferrer"
-                  aria-label="Instagram"
-                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-amber-400 transition-colors"
-                >
-                  <svg className="w-4 h-4 fill-currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
-                  </svg>
-                </a>
-                <a
-                  href="https://www.facebook.com/skillcofee" target="_blank" rel="noopener noreferrer"
-                  aria-label="Facebook"
-                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-blue-400 transition-colors"
-                >
-                  <svg className="w-4 h-4 fill-currentColor" viewBox="0 0 24 24">
-                    <path d="M9 8H6v4h3v12h5V12h3.642L18 8h-4V6.333C14 5.374 14.5 5 15.667 5H18V0h-3.889C10.667 0 9 1.667 9 4.889V8z"/>
-                  </svg>
-                </a>
-                <a
-                  href="https://www.youtube.com/@skillcofee" target="_blank" rel="noopener noreferrer"
-                  aria-label="YouTube"
-                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-rose-500 transition-colors"
-                >
-                  <svg className="w-4 h-4 fill-currentColor" viewBox="0 0 24 24">
-                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                  </svg>
-                </a>
+      <footer
+        className={`mt-16 border-t ${
+          isDarkMode ? 'border-white/10 bg-[#241510]' : 'border-stone-200 bg-[#FAF5EC]'
+        }`}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            {/* Brand */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-[#FAF7F2] flex items-center justify-center shadow-md overflow-hidden border border-[#2B1810]/20 p-1 shrink-0">
+                <img
+                  src="/skill-coffee-icon.png"
+                  alt="Skill Coffee"
+                  className="w-full h-full object-contain"
+                />
               </div>
+              <div className="text-center md:text-left">
+                <p className={`font-serif text-sm font-bold leading-tight ${isDarkMode ? 'text-[#f8ede1]' : 'text-[#2B1810]'}`}>
+                  Skill Coffee
+                </p>
+                <p className={`text-[11px] ${isDarkMode ? 'text-stone-400' : 'text-stone-500'}`}>
+                  Freshly roasted · Addis Ababa
+                </p>
+              </div>
+            </div>
+
+            {/* Quick actions */}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button type="button" onClick={() => footerContact('call')} className={`${footerChip} cursor-pointer`}>
+                <Phone size={13} className="text-amber-500" />
+                Call
+              </button>
+              <button type="button" onClick={() => footerContact('email')} className={`${footerChip} cursor-pointer`}>
+                <Mail size={13} className="text-amber-500" />
+                Email
+              </button>
+              <a
+                href="https://maps.google.com/?q=Skill+Coffee+Addis+Ababa"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={footerChip}
+              >
+                <MapPin size={13} className="text-amber-500" />
+                Directions
+              </a>
+            </div>
+
+            {/* Social */}
+            <div className="flex items-center gap-2">
+              <a
+                href="https://www.instagram.com/skillcofee" target="_blank" rel="noopener noreferrer"
+                aria-label="Instagram"
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-amber-400 transition-colors"
+              >
+                <svg className="w-4 h-4 fill-currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                </svg>
+              </a>
+              <a
+                href="https://www.facebook.com/skillcofee" target="_blank" rel="noopener noreferrer"
+                aria-label="Facebook"
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-blue-400 transition-colors"
+              >
+                <svg className="w-4 h-4 fill-currentColor" viewBox="0 0 24 24">
+                  <path d="M9 8H6v4h3v12h5V12h3.642L18 8h-4V6.333C14 5.374 14.5 5 15.667 5H18V0h-3.889C10.667 0 9 1.667 9 4.889V8z"/>
+                </svg>
+              </a>
+              <a
+                href="https://www.youtube.com/@skillcofee" target="_blank" rel="noopener noreferrer"
+                aria-label="YouTube"
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-rose-500 transition-colors"
+              >
+                <svg className="w-4 h-4 fill-currentColor" viewBox="0 0 24 24">
+                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                </svg>
+              </a>
             </div>
           </div>
 
-          <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row items-center justify-between text-[11px] opacity-70 gap-2">
-            <p>© 2026 Skill Coffee · Addis Ababa, Ethiopia.</p>
-            <div className="flex items-center gap-4">
-              <a href="tel:+251911234567" className="hover:text-amber-300 transition-colors">Contact Us</a>
-              <span>•</span>
-              <a href="mailto:hello@skillcoffee.et" className="hover:text-amber-300 transition-colors">hello@skillcoffee.et</a>
-            </div>
+          <div className={`border-t pt-5 text-center text-[11px] ${isDarkMode ? 'border-white/10 text-stone-400' : 'border-stone-200 text-stone-500'}`}>
+            © 2026 Skill Coffee · Addis Ababa, Ethiopia ·{' '}
+            <a href="mailto:hello@skillcoffee.et" className="hover:text-amber-500 transition-colors">hello@skillcoffee.et</a>
           </div>
         </div>
       </footer>

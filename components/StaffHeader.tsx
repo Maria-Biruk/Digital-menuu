@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { getRoleInfo } from "@/lib/permissions";
 import { signOutStaff } from "@/lib/supabase";
+import { STAFF_LANG_LABEL, useStaffLang } from "@/lib/i18n/staff";
+import { Languages } from "lucide-react";
 
 interface StaffHeaderProps {
   title: string;
@@ -31,6 +33,7 @@ export default function StaffHeader({
 }: StaffHeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { lang, setLang, t } = useStaffLang();
 
   const [role, setRole] = useState<string | null>(null);
 
@@ -52,7 +55,6 @@ export default function StaffHeader({
   const roleInfo = getRoleInfo(role);
   const isSuperAdmin = roleInfo.role === "super_admin" || roleInfo.role === "owner";
   const isAdmin = roleInfo.role === "admin";
-
   const isKitchenStation = pathname.startsWith("/staff/kitchen");
   const isBarStation = pathname.startsWith("/staff/bar");
   const isFloorStation = pathname.startsWith("/staff/floor");
@@ -100,7 +102,6 @@ export default function StaffHeader({
     await signOutStaff();
     router.push("/admin/login");
   };
-
   return (
     <header className="sticky top-0 z-40 bg-[#3A241A]/95 backdrop-blur-md border-b border-[#2B1810] shadow-md px-4 sm:px-6 py-3.5">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -112,16 +113,16 @@ export default function StaffHeader({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-serif font-bold text-lg md:text-xl text-white tracking-wide">
-                {title}
+                {t(title)}
               </h1>
               {badge && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-                  {badge}
+                  {t(badge)}
                 </span>
               )}
             </div>
             <p className="text-[11px] text-stone-400 font-medium">
-              Skill Coffee • {subtitle}
+              {t("Skill Coffee")} • {t(subtitle)}
             </p>
           </div>
         </div>
@@ -132,42 +133,42 @@ export default function StaffHeader({
           {roleInfo.role === "kitchen" && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 text-[11px] font-bold shadow-inner">
               <Lock className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Kitchen Private Terminal</span>
+              <span>{t("Kitchen Private Terminal")}</span>
             </div>
           )}
 
           {(roleInfo.role === "bar" || roleInfo.role === "bartender") && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-950/80 border border-purple-700/60 text-purple-300 text-[11px] font-bold shadow-inner">
               <Lock className="w-3.5 h-3.5 text-purple-400" />
-              <span>Bar Private Terminal</span>
+              <span>{t("Bar Private Terminal")}</span>
             </div>
           )}
 
           {roleInfo.role === "waiter" && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-950/80 border border-cyan-700/60 text-cyan-300 text-[11px] font-bold shadow-inner">
               <Lock className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Floor Waiter Terminal</span>
+              <span>{t("Floor Waiter Terminal")}</span>
             </div>
           )}
 
           {roleInfo.role === "cashier" && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[11px] font-bold shadow-inner">
               <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span>POS Cashier Terminal</span>
+              <span>{t("POS Cashier Terminal")}</span>
             </div>
           )}
 
           {isSuperAdmin && (
             <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-950/90 border border-amber-700/80 text-amber-300 text-[11px] font-bold shadow-sm">
               <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-              <span>Super Admin Master Access</span>
+              <span>{t("Super Admin Master Access")}</span>
             </div>
           )}
 
           {isAdmin && (
             <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-950/80 border border-blue-700/70 text-blue-300 text-[11px] font-bold">
               <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-              <span>Admin Operations Mode</span>
+              <span>{t("Admin Operations Mode")}</span>
             </div>
           )}
 
@@ -186,7 +187,7 @@ export default function StaffHeader({
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
-                  <span>{link.label}</span>
+                  <span>{t(link.label)}</span>
                 </Link>
               );
             })}
@@ -195,20 +196,49 @@ export default function StaffHeader({
 
         {/* Right: Quick actions */}
         <div className="hidden sm:flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setLang(lang === "am" ? "en" : "am")}
+            title={lang === "am" ? "Switch to English" : "አማርኛ ለመቀየር"}
+            className="flex items-center gap-1.5 text-xs font-bold bg-[#2B1810] hover:bg-[#3D2415] text-amber-200 px-3 py-1.5 rounded-lg border border-[#3D2415] transition-colors cursor-pointer"
+          >
+            <Languages className="w-3.5 h-3.5" />
+            <span>{STAFF_LANG_LABEL[lang]}</span>
+          </button>
           <Link
             href="/meskel-house/order"
             target="_blank"
             className="text-xs bg-[#2B1810] hover:bg-[#3D2415] text-stone-300 hover:text-white px-3 py-1.5 rounded-lg border border-[#3D2415] transition-colors"
           >
-            Customer View ↗
+            {t("Customer View ↗")}
           </Link>
           <button
             onClick={handleLogout}
             className="flex items-center gap-1.5 text-xs text-rose-300/80 hover:text-rose-200 bg-rose-950/30 hover:bg-rose-950/60 border border-rose-900/40 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-            title="Sign out of staff session"
+            title={t("Sign out of staff session")}
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Logout</span>
+            <span>{t("Logout")}</span>
+          </button>
+        </div>
+
+        {/* Mobile: language + logout stay reachable on phones (staff work on tablets/phones) */}
+        <div className="flex sm:hidden items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setLang(lang === "am" ? "en" : "am")}
+            className="flex items-center gap-1.5 text-xs font-bold bg-[#2B1810] text-amber-200 px-3 py-1.5 rounded-lg border border-[#3D2415] cursor-pointer"
+          >
+            <Languages className="w-3.5 h-3.5" />
+            <span>{STAFF_LANG_LABEL[lang]}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 text-xs text-rose-300/90 bg-rose-950/30 border border-rose-900/40 px-3 py-1.5 rounded-lg cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>{t("Logout")}</span>
           </button>
         </div>
       </div>

@@ -25,6 +25,7 @@ export const ROLE_CONFIG: Record<string, RoleInfo> = {
       '/admin/menu',
       '/admin/payment-accounts',
       '/admin/tables',
+      '/admin/payment-history',
       '/admin/analytics',
       '/staff/kitchen',
       '/staff/bar',
@@ -47,6 +48,7 @@ export const ROLE_CONFIG: Record<string, RoleInfo> = {
       '/admin/menu',
       '/admin/payment-accounts',
       '/admin/tables',
+      '/admin/payment-history',
       '/admin/analytics',
       '/staff/kitchen',
       '/staff/bar',
@@ -68,6 +70,7 @@ export const ROLE_CONFIG: Record<string, RoleInfo> = {
     allowedRoutes: [
       '/admin/menu',
       '/admin/tables',
+      '/admin/payment-history',
       '/staff/kitchen',
       '/staff/bar',
       '/staff/floor',

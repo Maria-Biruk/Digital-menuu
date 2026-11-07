@@ -130,6 +130,10 @@ export interface Ticket {
   pickup_code?: string;
   created_at: string;
   elapsed_minutes?: number;
+  // Real station timestamps (from order_station_tickets) — drive the floor
+  // view's live "in preparation" counter instead of a guessed default.
+  started_at?: string;
+  ready_at?: string;
 }
 
 export interface CallWaiterAlert {

@@ -4,13 +4,15 @@ import React, { useState, useEffect, useCallback } from "react";
 import StaffHeader from "@/components/StaffHeader";
 import PaymentVerificationQueue from "@/components/PaymentVerificationQueue";
 import WalkInOrderForm from "@/components/WalkInOrderForm";
+import PaymentHistory from "@/components/PaymentHistory";
 import ApprovedOrderModal from "@/components/ApprovedOrderModal";
 import NotificationToast from "@/components/NotificationToast";
 import { useNewArrivalNotifier } from "@/lib/notify";
 import { orderNumber } from "@/lib/order-number";
 import { fetchPendingPayments, subscribePayments, approvePayment, rejectPayment, fetchOrderTickets } from "@/lib/db";
 import { Payment, Ticket } from "@/lib/types";
-import { CreditCard, ShieldCheck, UserPlus, Receipt, CheckCircle, AlertCircle } from "lucide-react";
+import { CreditCard, ShieldCheck, UserPlus, Receipt, CheckCircle, AlertCircle, History } from "lucide-react";
+import { useStaffLang } from "@/lib/i18n/staff";
 
 import RoleGuard from "@/components/RoleGuard";
 
@@ -23,7 +25,14 @@ export default function CashierPaymentsPage() {
 }
 
 function CashierPaymentsContent() {
-  const [activeTab, setActiveTab] = useState<"verify" | "walkin">("verify");
+  const { t } = useStaffLang();
+  const [activeTab, setActiveTab] = useState<"verify" | "walkin" | "history">("verify");
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("staff_role");
+    setIsSuperAdmin(saved === "super_admin" || saved === "owner");
+  }, []);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [existingTxIds, setExistingTxIds] = useState<string[]>([]);
   const [notification, setNotification] = useState<{ msg: string; type: "success" | "error" } | null>(null);
@@ -67,9 +76,9 @@ function CashierPaymentsContent() {
           tickets,
         });
       }
-      showNotification("Payment approved. Review the order and send it to the kitchen.");
+      showNotification(t("Payment approved. Review the order and send it to the kitchen."));
     } catch (err) {
-      showNotification(err instanceof Error ? err.message : "Failed to approve payment", "error");
+      showNotification(err instanceof Error ? err.message : t("Failed to approve payment"), "error");
     }
   };
 
@@ -77,15 +86,32 @@ function CashierPaymentsContent() {
     try {
       await rejectPayment(paymentId);
       await loadPayments();
-      showNotification("Payment rejected. Customer notified to upload valid proof.");
+      showNotification(t("Payment rejected. Customer notified to upload valid proof."));
     } catch (err) {
-      showNotification(err instanceof Error ? err.message : "Failed to reject payment", "error");
+      showNotification(err instanceof Error ? err.message : t("Failed to reject payment"), "error");
     }
   };
 
-  const handleWalkInCompleted = () => {
+  const handleWalkInCompleted = async (summary: {
+    orderId: string;
+    amount: number;
+    account_label?: string;
+  }) => {
     void loadPayments();
-    showNotification("Walk-in Order created successfully!");
+    showNotification(t("Walk-in Order created successfully!"));
+    // Reuse the dispatch modal so the cashier can send the held tickets to
+    // kitchen & bar with one tap, exactly like an approved diner order.
+    try {
+      const tickets = await fetchOrderTickets(summary.orderId);
+      setApproved({
+        orderId: summary.orderId,
+        amount: summary.amount,
+        accountLabel: summary.account_label ?? t("Walk-in"),
+        tickets,
+      });
+    } catch (err) {
+      console.error("Failed to load walk-in tickets", err);
+    }
   };
 
   // Chime + toast when a diner submits a new payment proof to verify.
@@ -93,8 +119,8 @@ function CashierPaymentsContent() {
     payments,
     (p) => p.id,
     (p) => ({
-      title: "New Payment to Verify",
-      message: `💳 #${orderNumber(p.order_id)} · ${p.account_label} · ${p.amount.toLocaleString()} ETB awaiting review`,
+      title: t("New Payment to Verify"),
+      message: `💳 #${orderNumber(p.order_id)} · ${p.account_label} · ${p.amount.toLocaleString()} ETB ${t("awaiting review")}`,
     }),
   );
 
@@ -102,9 +128,9 @@ function CashierPaymentsContent() {
     <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
       <NotificationToast toast={arrivalToast} onDismiss={dismissToast} />
       <StaffHeader
-        title="Cashier & Billing Console"
-        subtitle="Verification & Walk-in Terminal"
-        badge="POS Active"
+        title={t("Cashier & Billing Console")}
+        subtitle={t("Verification & Walk-in Terminal")}
+        badge={t("POS Active")}
         icon={<CreditCard className="w-5 h-5 text-amber-400" />}
       />
 
@@ -138,7 +164,7 @@ function CashierPaymentsContent() {
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            <span>Verify Payments</span>
+            <span>{t("Verify Payments")}</span>
             <span
               className={`text-xs px-2 py-0.5 rounded-full ${
                 activeTab === "verify"
@@ -159,7 +185,19 @@ function CashierPaymentsContent() {
             }`}
           >
             <UserPlus className="w-4 h-4" />
-            <span>Walk-in Order</span>
+            <span>{t("Walk-in Order")}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("history")}
+            className={`pb-4 px-6 text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === "history"
+                ? "border-amber-400 text-amber-300"
+                : "border-transparent text-stone-400 hover:text-stone-200"
+            }`}
+          >
+            <History className="w-4 h-4" />
+            <span>{t("Payment History")}</span>
           </button>
         </div>
 
@@ -169,14 +207,14 @@ function CashierPaymentsContent() {
             <div className="bg-[#3A241A] border border-[#2B1810] rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div>
                 <h2 className="font-serif font-bold text-base text-white">
-                  Incoming Diner Proofs
+                  {t("Incoming Diner Proofs")}
                 </h2>
                 <p className="text-xs text-stone-400">
-                  Inspect SMS screenshots or transfer receipts. Enter or verify transaction IDs before approval.
+                  {t("Inspect SMS screenshots or transfer receipts. Enter or verify transaction IDs before approval.")}
                 </p>
               </div>
               <div className="text-xs text-stone-400 font-mono bg-[#38210F] px-3 py-1.5 rounded-lg border border-[#2B1810]">
-                Known TX IDs: <strong className="text-amber-400">{existingTxIds.length}</strong>
+                {t("Known TX IDs")}: <strong className="text-amber-400">{existingTxIds.length}</strong>
               </div>
             </div>
 
@@ -194,14 +232,21 @@ function CashierPaymentsContent() {
           <div className="space-y-4">
             <div className="bg-[#3A241A] border border-[#2B1810] rounded-2xl p-4">
               <h2 className="font-serif font-bold text-base text-white">
-                Walk-In / Phone Order Terminal
+                {t("Walk-In / Phone Order Terminal")}
               </h2>
               <p className="text-xs text-stone-400">
-                Directly take orders for walk-in guests or phone orders, collect cash or transfer, and auto-route to kitchen and bar.
+                {t("Directly take orders for walk-in guests or phone orders, collect cash or transfer, and auto-route to kitchen and bar.")}
               </p>
             </div>
 
             <WalkInOrderForm onOrderCompleted={handleWalkInCompleted} />
+          </div>
+        )}
+
+        {/* Tab 3: Payment History with screenshots */}
+        {activeTab === "history" && (
+          <div className="bg-[#3A241A] border border-[#2B1810] rounded-2xl p-4 sm:p-5">
+            <PaymentHistory defaultRange="week" allowExport={isSuperAdmin} />
           </div>
         )}
       </div>

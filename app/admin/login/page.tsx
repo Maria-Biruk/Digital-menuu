@@ -16,24 +16,27 @@ import {
   ChefHat,
 } from "lucide-react";
 import { signInStaff, fetchStaffRole } from "@/lib/supabase";
+import { STAFF_LANG_LABEL, useStaffLang, type StaffLang } from "@/lib/i18n/staff";
+import { Languages } from "lucide-react";
 
 // Verified staff account used for one-click dev access (also used by backend/scripts/smoke.mjs).
 const DEMO_SESSION = { email: "mayabrook1924@gmail.com", password: "mayanan0909" };
 
 export default function AdminLoginPage() {
   const router = useRouter();
+  const { t, lang, setLang } = useStaffLang();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("demo123");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const roles = [
-    { name: "Super Admin", username: "superadmin", roleKey: "super_admin", target: "/admin/menu", icon: Crown, color: "text-amber-400", desc: "Master Control" },
-    { name: "Admin", username: "admin", roleKey: "admin", target: "/admin/menu", icon: ShieldCheck, color: "text-blue-400", desc: "Limited Ops" },
-    { name: "Kitchen", username: "chef", roleKey: "kitchen", target: "/staff/kitchen", icon: ChefHat, color: "text-emerald-400", desc: "Kitchen Only" },
-    { name: "Bartender", username: "bar", roleKey: "bar", target: "/staff/bar", icon: Wine, color: "text-purple-400", desc: "Bar Only" },
-    { name: "Waiter", username: "waiter", roleKey: "waiter", target: "/staff/floor", icon: UserCheck, color: "text-cyan-400", desc: "Floor Only" },
-    { name: "Cashier", username: "cashier", roleKey: "cashier", target: "/staff/payments", icon: CreditCard, color: "text-amber-300", desc: "Cashier Only" },
+    { name: t("Super Admin"), username: "superadmin", roleKey: "super_admin", target: "/admin/menu", icon: Crown, color: "text-amber-400", desc: t("Master Control") },
+    { name: t("Admin"), username: "admin", roleKey: "admin", target: "/admin/menu", icon: ShieldCheck, color: "text-blue-400", desc: t("Limited Ops") },
+    { name: t("Kitchen"), username: "chef", roleKey: "kitchen", target: "/staff/kitchen", icon: ChefHat, color: "text-emerald-400", desc: t("Kitchen Only") },
+    { name: t("Bartender"), username: "bar", roleKey: "bar", target: "/staff/bar", icon: Wine, color: "text-purple-400", desc: t("Bar Only") },
+    { name: t("Waiter"), username: "waiter", roleKey: "waiter", target: "/staff/floor", icon: UserCheck, color: "text-cyan-400", desc: t("Floor Only") },
+    { name: t("Cashier"), username: "cashier", roleKey: "cashier", target: "/staff/payments", icon: CreditCard, color: "text-amber-300", desc: t("Cashier Only") },
   ];
 
   // Establish a real Supabase session so station consoles can read live data (RLS),
@@ -46,7 +49,7 @@ export default function AdminLoginPage() {
       localStorage.setItem("staff_role", roleKey);
       router.push(target);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign in failed");
+      setError(err instanceof Error ? err.message : t("Sign in failed"));
       setLoading(false);
     }
   };
@@ -61,7 +64,7 @@ export default function AdminLoginPage() {
         await signInStaff(username.trim(), password);
         const role = await fetchStaffRole();
         if (!role) {
-          setError("Signed in, but this account has no active staff role in staff_users.");
+          setError(t("Signed in, but this account has no active staff role in staff_users."));
           setLoading(false);
           return;
         }
@@ -97,7 +100,7 @@ export default function AdminLoginPage() {
       }
       await quickAccess(roleKey, targetUrl);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign in failed");
+      setError(err instanceof Error ? err.message : t("Sign in failed"));
       setLoading(false);
     }
   };
@@ -119,8 +122,25 @@ export default function AdminLoginPage() {
         className="absolute top-4 left-4 sm:top-6 sm:left-6 flex min-h-[44px] items-center gap-2 text-xs font-semibold uppercase tracking-wider text-stone-400 hover:text-white transition-colors py-2.5 px-4 rounded-full border border-[#2B1810] bg-[#3A241A]/80 backdrop-blur"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
-        Customer Menu
+        {t("Customer Menu")}
       </Link>
+
+      {/* Staff language switcher — Amharic is the default for the team. */}
+      <div className="absolute top-4 right-4 sm:top-6 sm:right-6 flex items-center gap-1 p-1 rounded-full border border-[#2B1810] bg-[#3A241A]/80 backdrop-blur">
+        <Languages className="w-3.5 h-3.5 text-amber-400 ml-2 mr-1" />
+        {(Object.keys(STAFF_LANG_LABEL) as StaffLang[]).map((l) => (
+          <button
+            key={l}
+            type="button"
+            onClick={() => setLang(l)}
+            className={`px-3 py-1.5 rounded-full text-[11px] font-bold transition-colors cursor-pointer ${
+              lang === l ? "bg-[#2B1810] text-amber-300" : "text-stone-400 hover:text-white"
+            }`}
+          >
+            {STAFF_LANG_LABEL[l]}
+          </button>
+        ))}
+      </div>
 
       <div className="w-full max-w-md my-2 sm:my-8">
         {/* Logo and Brand */}
@@ -133,10 +153,10 @@ export default function AdminLoginPage() {
             />
           </div>
           <h1 className="font-serif font-bold text-3xl tracking-wide text-white">
-            Staff Portal
+            {t("Staff Portal")}
           </h1>
           <p className="font-sans text-xs text-stone-400 mt-1 font-medium">
-            Skill Coffee Management &amp; Service Systems
+            {t("Skill Coffee")} {t("Management & Service Systems")}
           </p>
         </div>
 
@@ -152,14 +172,14 @@ export default function AdminLoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5 flex items-center gap-1.5">
-                <User className="w-3 h-3 text-amber-400" /> Username
+                <User className="w-3 h-3 text-amber-400" /> {t("Username")}
               </label>
               <input
                 type="text"
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter staff username"
+                placeholder={t("Enter staff username")}
                 autoComplete="username"
                 inputMode="text"
                 className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-base text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
@@ -168,7 +188,7 @@ export default function AdminLoginPage() {
 
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5 flex items-center gap-1.5">
-                <Lock className="w-3 h-3 text-amber-400" /> Password
+                <Lock className="w-3 h-3 text-amber-400" /> {t("Password")}
               </label>
               <input
                 type="password"
@@ -181,7 +201,7 @@ export default function AdminLoginPage() {
                 className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-base text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
               />
               <p className="text-[10px] text-stone-500 mt-1">
-                Demo mode: any username/password opens a live staff session. Type a real email for a true login.
+                {t("Demo mode: any username/password opens a live staff session. Type a real email for a true login.")}
               </p>
             </div>
 
@@ -193,10 +213,10 @@ export default function AdminLoginPage() {
               {loading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-                  Accessing Dashboard...
+                  {t("Accessing Dashboard...")}
                 </>
               ) : (
-                "Access Dashboard"
+                t("Access Dashboard")
               )}
             </button>
           </form>
@@ -204,7 +224,7 @@ export default function AdminLoginPage() {
           {/* Role Buttons Quick Launch */}
           <div className="mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-[#2B1810]">
             <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 text-center mb-3">
-              Quick Sandbox Access
+              {t("Quick Sandbox Access")}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {roles.map((r) => {

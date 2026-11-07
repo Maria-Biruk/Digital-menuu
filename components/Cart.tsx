@@ -39,9 +39,8 @@ export default function Cart({
     (sum, cur) => sum + cur.item.price * cur.qty,
     0
   );
-  const vat = Math.round(subtotal * 0.15);
   const serviceCharge = lines.length > 0 ? 25 : 0;
-  const total = subtotal + vat + serviceCharge;
+  const total = subtotal + serviceCharge;
 
   if (lineDetails.length === 0) {
     return (
@@ -127,10 +126,6 @@ export default function Cart({
         <div className="flex justify-between text-neutral-600 dark:text-stone-400 font-medium">
           <span>Subtotal</span>
           <span>{subtotal.toLocaleString()} ETB</span>
-        </div>
-        <div className="flex justify-between text-neutral-600 dark:text-stone-400 font-medium">
-          <span>VAT (15%)</span>
-          <span>{vat.toLocaleString()} ETB</span>
         </div>
         <div className="flex justify-between text-neutral-600 dark:text-stone-400 font-medium pb-1.5 border-b border-neutral-200 dark:border-stone-800">
           <span>Service Charge</span>

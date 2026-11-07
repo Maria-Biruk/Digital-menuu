@@ -85,6 +85,10 @@ function AdminAnalyticsContent() {
     push("Sales by Category");
     push("Category", "Units Sold", "Share (%)");
     stats.categoryBreakdown.forEach((c) => push(c.name, c.count, c.percentage));
+    rows.push([]);
+    push("Average Prep / Delivery Time per Product");
+    push("Item", "Avg Minutes", "Samples");
+    stats.itemPrep.forEach((p) => push(p.name, p.avgMinutes, p.samples));
 
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -109,6 +113,7 @@ function AdminAnalyticsContent() {
     ordersSeries: [],
     categorySeries: [],
     itemSales: [],
+    itemPrep: [],
     peakBucket: "—",
   };
 
@@ -133,14 +138,14 @@ function AdminAnalyticsContent() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Timeframe Chips */}
-            <div className="flex bg-[#38210F] p-1 rounded-xl border border-[#2B1810]">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+            {/* Timeframe Chips — swipeable strip on phones */}
+            <div className="flex bg-[#38210F] p-1 rounded-xl border border-[#2B1810] overflow-x-auto hide-scrollbar">
               {periods.map((t) => (
                 <button
                   key={t}
                   onClick={() => setTimeframe(t)}
-                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all cursor-pointer ${
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all cursor-pointer whitespace-nowrap ${
                     timeframe === t
                       ? "bg-[#2B1810] text-amber-300 font-bold shadow-sm border border-[#3D2415]"
                       : "text-stone-400 hover:text-white"
@@ -154,9 +159,9 @@ function AdminAnalyticsContent() {
             <button
               onClick={handleExport}
               disabled={loading || !stats}
-              className="px-3.5 py-2 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-stone-200 hover:text-white text-xs font-semibold border border-[#3D2415] flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3.5 py-2 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-stone-200 hover:text-white text-xs font-semibold border border-[#3D2415] flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
             >
-              <Download className="w-3.5 h-3.5" />
+              <Download className="w-3.5 h-3.5 shrink-0" />
               <span>Export Report</span>
             </button>
           </div>
@@ -174,6 +179,7 @@ function AdminAnalyticsContent() {
           ordersSeries={currentStats.ordersSeries}
           categorySeries={currentStats.categorySeries}
           itemSales={currentStats.itemSales}
+          itemPrep={currentStats.itemPrep}
           peakBucket={currentStats.peakBucket}
           period={timeframe}
           loading={loading}

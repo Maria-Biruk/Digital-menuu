@@ -11,6 +11,7 @@ import { handleImgError } from "@/lib/img";
 import { fetchStationTickets, subscribeTickets, setTicketStatus, setItemAvailability, fetchCatalog } from "@/lib/db";
 import { Ticket, TicketStatus, MenuItem } from "@/lib/types";
 import { signOutStaff } from "@/lib/supabase";
+import { loc, useStaffLang } from "@/lib/i18n/staff";
 import { Wine, ToggleLeft, ToggleRight, Coffee, GlassWater, ShieldAlert, Lock, ArrowLeft } from "lucide-react";
 
 import RoleGuard from "@/components/RoleGuard";
@@ -25,6 +26,7 @@ export default function BarConsolePage() {
 
 function BarConsoleContent() {
   const router = useRouter();
+  const { t, lang } = useStaffLang();
   const [role, setRole] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -56,10 +58,10 @@ function BarConsoleContent() {
   // Chime + notification when a new drink ticket lands on the bar.
   const { toast: arrivalToast, dismiss: dismissToast } = useNewArrivalNotifier(
     tickets,
-    (t) => t.id,
-    (t) => ({
-      title: "New Bar Order",
-      message: `☕ #${orderNumber(t.order_id)} · ${t.table_label}: ${t.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}`,
+    (tk) => tk.id,
+    (tk) => ({
+      title: t("New Bar Order"),
+      message: `☕ #${orderNumber(tk.order_id)} · ${tk.table_label}: ${tk.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}`,
     }),
   );
 
@@ -105,13 +107,13 @@ function BarConsoleContent() {
           </div>
           <div className="space-y-2">
             <span className="text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-800">
-              Station Privacy Enforced
+              {t("Station Privacy Enforced")}
             </span>
             <h2 className="font-serif font-bold text-2xl text-white">
-              Bar Console Restricted
+              {t("Bar Console Restricted")}
             </h2>
             <p className="text-xs text-stone-400 leading-relaxed">
-              You are signed in as <span className="text-amber-400 font-bold">Kitchen Staff</span>. Kitchen personnel and chefs cannot view or manage the Bar & Beverage console. Beverage order tickets and recipes are protected by station privacy.
+              {t("You are signed in as")} <span className="text-amber-400 font-bold">{t("Kitchen Staff")}</span>. {t("Kitchen personnel and chefs cannot view or manage the Bar & Beverage console. Beverage order tickets and recipes are protected by station privacy.")}
             </p>
           </div>
           <div className="pt-2 flex flex-col gap-2">
@@ -119,7 +121,7 @@ function BarConsoleContent() {
               onClick={() => router.push("/staff/kitchen")}
               className="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-stone-950 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-amber-950/40"
             >
-              Return to Kitchen Console
+              {t("Return to Kitchen Console")}
             </button>
             <button
               onClick={async () => {
@@ -129,7 +131,7 @@ function BarConsoleContent() {
               }}
               className="w-full py-2.5 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-stone-400 hover:text-white font-semibold text-xs transition-colors cursor-pointer border border-[#3D2415]"
             >
-              Switch Role / Re-login
+              {t("Switch Role / Re-login")}
             </button>
           </div>
         </div>
@@ -141,9 +143,9 @@ function BarConsoleContent() {
     <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
       <NotificationToast toast={arrivalToast} onDismiss={dismissToast} />
       <StaffHeader
-        title="Bar Console"
-        subtitle="Coffee, Cocktails & Beverages"
-        badge="Bar Queue"
+        title={t("Bar Console")}
+        subtitle={t("Coffee, Cocktails & Beverages")}
+        badge={t("Bar Queue")}
         icon={<Wine className="w-5 h-5 text-amber-400" />}
       />
 
@@ -153,7 +155,7 @@ function BarConsoleContent() {
           <TicketQueue
             tickets={tickets}
             onAdvance={handleAdvance}
-            title="Drink & Beverage Orders"
+            title={t("Drink & Beverage Orders")}
           />
         </div>
 
@@ -163,14 +165,14 @@ function BarConsoleContent() {
             <div className="flex items-center justify-between border-b border-[#2B1810] pb-3 mb-4">
               <div>
                 <h2 className="font-serif font-bold text-base text-white">
-                  Bar 86 / In-Stock
+                  {t("Bar 86 / In-Stock")}
                 </h2>
                 <p className="text-[11px] text-stone-400">
-                  Toggle coffee & cocktail availability
+                  {t("Toggle coffee & cocktail availability")}
                 </p>
               </div>
               <span className="text-[10px] px-2 py-0.5 rounded bg-[#2B1810] text-amber-300 font-mono">
-                {barMenu.filter((i) => i.is_available).length}/{barMenu.length} Active
+                {barMenu.filter((i) => i.is_available).length}/{barMenu.length} {t("Active")}
               </span>
             </div>
 
@@ -189,7 +191,7 @@ function BarConsoleContent() {
                     />
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-white truncate max-w-[130px]">
-                        {item.name_i18n.en}
+                        {loc(item.name_i18n, lang)}
                       </p>
                       <p className="text-[10px] text-amber-400/90 font-mono">
                         {item.price} ETB
@@ -200,15 +202,15 @@ function BarConsoleContent() {
                   <button
                     onClick={() => handleToggleItem(item.id)}
                     className="cursor-pointer transition-transform active:scale-95 shrink-0"
-                    title="Toggle drink availability"
+                    title={t("Toggle drink availability")}
                   >
                     {item.is_available ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400">
-                        In Stock <ToggleRight className="w-5 h-5" />
+                        {t("In Stock")} <ToggleRight className="w-5 h-5" />
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-400">
-                        86'd <ToggleLeft className="w-5 h-5" />
+                        {t("86'd")} <ToggleLeft className="w-5 h-5" />
                       </span>
                     )}
                   </button>

@@ -11,7 +11,8 @@ export default function OrderLandingPage() {
   const searchParams = useSearchParams();
 
   const slug = (params?.restaurantSlug as string) || SLUG;
-  const tableId = searchParams?.get('table') || 't1';
+  const tableParam = searchParams?.get('table') || '';
+  const tableId = tableParam || 't1';
   const initialLang = (searchParams?.get('lang') as Lang) || 'en';
 
   return (
@@ -19,6 +20,7 @@ export default function OrderLandingPage() {
       tableId={tableId}
       slug={slug}
       initialLang={initialLang}
+      askTableOnArrival={!tableParam}
     />
   );
 }

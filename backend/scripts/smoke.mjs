@@ -71,11 +71,12 @@ const { data: order, error: orderErr } = await anon.rpc("create_order", {
 check("diner can create an order", !orderErr && !!order?.order_id, msg(orderErr));
 if (orderErr) process.exit(1);
 
-const vat = Math.round(sub * 0.15 * 100) / 100;
+// VAT was removed for this cafe (2026-11-06): total = subtotal + flat service fee.
+const SERVICE_FEE = 25;
 check(
-    "server computed total = subtotal + 15% VAT + service fee",
-    Math.abs(Number(order.total) - (sub + vat + 25)) < 0.011,
-    `got ${order.total}, expected ${(sub + vat + 25).toFixed(2)}`,
+    "server computed total = subtotal + service fee (no VAT)",
+    Math.abs(Number(order.total) - (sub + SERVICE_FEE)) < 0.011,
+    `got ${order.total}, expected ${(sub + SERVICE_FEE).toFixed(2)}`,
 );
 
 const { data: mine } = await anon.from("orders").select("id, payment_status").eq("id", order.order_id);
@@ -172,6 +173,33 @@ if (!STAFF_EMAIL || !STAFF_PASSWORD) {
             p_code: order.pickup_code,
         });
         check("correct pickup code marks the order served", served?.ok === true, JSON.stringify(served));
+
+        // Walk-in / phone POS: one server-side call must settle and route the order.
+        const { data: walkin, error: walkinErr } = await staff.rpc("create_walk_in_order", {
+            p_items: lines,
+            p_fulfillment: "takeaway",
+            p_table_id: null,
+            p_phone: "+251900000000",
+            p_method: "cash",
+            p_transaction_id: null,
+            p_account_id: null,
+            p_service_mode: lines.length === 2 ? "together" : "not_applicable",
+            p_notes: "SMOKE WALK-IN",
+        });
+        check(
+            "cashier can settle a walk-in order in one call",
+            !walkinErr && walkin?.ok === true && !!walkin?.order_id,
+            walkinErr ? msg(walkinErr) : JSON.stringify(walkin),
+        );
+        if (walkin?.ok) {
+            const { data: wiTickets } = await staff
+                .from("order_station_tickets")
+                .select("id")
+                .eq("order_id", walkin.order_id);
+            check("walk-in order auto-routed tickets to kitchen & bar", (wiTickets ?? []).length === lines.length);
+            const { data: wiOrder } = await staff.from("orders").select("payment_status").eq("id", walkin.order_id).single();
+            check("walk-in payment is auto-approved", wiOrder?.payment_status === "approved", wiOrder?.payment_status);
+        }
 
         await staff.auth.signOut();
     }

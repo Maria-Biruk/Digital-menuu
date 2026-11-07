@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, KeyRound, Utensils, BellRing, Sparkles } from 'luc
 import { Ticket } from '../lib/types';
 import { handleImgError } from '../lib/img';
 import { orderNumber } from '../lib/order-number';
+import { useT } from '../lib/i18n/staff';
 import PickupCodeEntry from './PickupCodeEntry';
 
 interface WaiterFloorViewProps {
@@ -18,6 +19,7 @@ export default function WaiterFloorView({
   onMarkServed,
   className = '',
 }: WaiterFloorViewProps) {
+  const t = useT();
   const [activeCodeTicket, setActiveCodeTicket] = useState<Ticket | null>(null);
   // Mobile-only column switcher (desktop always shows all three).
   const [mobileTab, setMobileTab] = useState<'ready' | 'preparing' | 'intake'>('ready');
@@ -64,7 +66,7 @@ export default function WaiterFloorView({
               mobileTab === tab.id ? tab.active : 'text-stone-400 hover:text-white bg-transparent'
             }`}
           >
-            {tab.label}
+            {t(tab.label)}
             <span
               className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
                 mobileTab === tab.id ? 'bg-black/25' : 'bg-stone-800 text-stone-300'
@@ -82,7 +84,7 @@ export default function WaiterFloorView({
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300">
             <div className="flex items-center gap-2">
               <CheckCircle2 size={18} className="text-emerald-400" />
-              <h3 className="font-serif font-bold text-sm">Ready to Serve</h3>
+              <h3 className="font-serif font-bold text-sm">{t('Ready to Serve')}</h3>
             </div>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500 text-neutral-950">
               {readyTickets.length}
@@ -92,7 +94,7 @@ export default function WaiterFloorView({
           <div className="space-y-3">
             {readyTickets.length === 0 ? (
               <div className="p-8 text-center rounded-2xl bg-[#3A241A]/30 border border-stone-800 text-stone-500 text-xs">
-                No orders ready for delivery at the moment.
+                {t('No orders ready for delivery at the moment.')}
               </div>
             ) : (
               readyTickets.map((ticket) => (
@@ -110,7 +112,7 @@ export default function WaiterFloorView({
                       </span>
                     </div>
                     <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40">
-                      READY
+                      {t('READY')}
                     </span>
                   </div>
 
@@ -138,7 +140,7 @@ export default function WaiterFloorView({
 
                   {ticket.notes && (
                     <p className="text-[11px] text-amber-300/80 italic">
-                      Note: {ticket.notes}
+                      {t('Note:')} {ticket.notes}
                     </p>
                   )}
 
@@ -147,7 +149,7 @@ export default function WaiterFloorView({
                     onClick={() => setActiveCodeTicket(ticket)}
                     className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer active:scale-95"
                   >
-                    <KeyRound size={15} /> Enter Pickup Code & Serve
+                    <KeyRound size={15} /> {t('Enter Pickup Code & Serve')}
                   </button>
                 </div>
               ))
@@ -160,7 +162,7 @@ export default function WaiterFloorView({
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-cyan-950/30 border border-cyan-500/30 text-cyan-300">
             <div className="flex items-center gap-2">
               <Clock size={18} className="text-cyan-400 animate-spin" />
-              <h3 className="font-serif font-bold text-sm">Cooking / Preparing</h3>
+              <h3 className="font-serif font-bold text-sm">{t('Cooking / Preparing')}</h3>
             </div>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-cyan-500 text-neutral-950">
               {preparingTickets.length}
@@ -170,7 +172,7 @@ export default function WaiterFloorView({
           <div className="space-y-3">
             {preparingTickets.length === 0 ? (
               <div className="p-8 text-center rounded-2xl bg-[#3A241A]/30 border border-stone-800 text-stone-500 text-xs">
-                No orders currently in the cooking pipeline.
+                {t('No orders currently in the cooking pipeline.')}
               </div>
             ) : (
               preparingTickets.map((ticket) => (
@@ -215,7 +217,7 @@ export default function WaiterFloorView({
                   </div>
 
                   <div className="pt-2 border-t border-stone-800/40 text-[10px] text-stone-500 flex items-center gap-1">
-                    <Clock size={11} /> {ticket.elapsed_minutes || 10} minutes in preparation
+                    <Clock size={11} /> {ticket.elapsed_minutes || 10} {t('minutes in preparation')}
                   </div>
                 </div>
               ))
@@ -228,7 +230,7 @@ export default function WaiterFloorView({
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#2B1810]/40 border border-[#2B1810] text-stone-300">
             <div className="flex items-center gap-2">
               <Sparkles size={18} className="text-amber-400" />
-              <h3 className="font-serif font-bold text-sm">Order Intake / Queued</h3>
+              <h3 className="font-serif font-bold text-sm">{t('Order Intake / Queued')}</h3>
             </div>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-stone-800 text-stone-300">
               {queueTickets.length}
@@ -238,7 +240,7 @@ export default function WaiterFloorView({
           <div className="space-y-3">
             {queueTickets.length === 0 ? (
               <div className="p-8 text-center rounded-2xl bg-[#3A241A]/30 border border-stone-800 text-stone-500 text-xs">
-                No freshly queued orders.
+                {t('No freshly queued orders.')}
               </div>
             ) : (
               queueTickets.map((ticket) => (
@@ -256,7 +258,7 @@ export default function WaiterFloorView({
                       </span>
                     </div>
                     <span className="text-[10px] font-mono text-amber-500">
-                      Waiting for Chef
+                      {t('Waiting for Chef')}
                     </span>
                   </div>
                   <div className="space-y-2 text-xs text-stone-400">

@@ -130,11 +130,22 @@ function mapTicketRow(r: Row): Ticket {
         items,
         status: r.status as TicketStatus,
         created_at: r.queued_at ?? new Date().toISOString(),
+        started_at: r.started_at ? String(r.started_at) : undefined,
+        ready_at: r.ready_at ? String(r.ready_at) : undefined,
+        // Live counter for the floor/kitchen cards.
+        elapsed_minutes: r.started_at
+            ? Math.max(
+                  0,
+                  Math.round(
+                      (Date.now() - new Date(String(r.started_at)).getTime()) / 60000,
+                  ),
+              )
+            : undefined,
     };
 }
 
 const TICKET_SELECT = `
-    id, order_id, station, status, queued_at,
+    id, order_id, station, status, queued_at, started_at, ready_at,
     order_items(quantity, special_instructions, menu_items(name_i18n, image_path)),
     orders(table_id, fulfillment_type, restaurant_tables(label))
 `;
@@ -252,11 +263,116 @@ export async function setItemAvailability(itemId: string, available: boolean): P
 }
 
 export async function markOrderServed(orderId: string, code: string): Promise<void> {
-    const { error } = await supabaseBrowser().rpc("mark_served", {
+    const { data, error } = await supabaseBrowser().rpc("mark_served", {
         p_order: orderId,
         p_code: code,
     });
     if (error) throw new Error(error.message);
+    const res = data as { ok?: boolean; reason?: string } | null;
+    if (res && res.ok === false) {
+        const reasons: Record<string, string> = {
+            not_found: "Order not found.",
+            wrong_code: "Wrong code — that is not the code this guest was given.",
+            forbidden: "You do not have permission to serve this order.",
+        };
+        throw new Error(reasons[res.reason ?? ""] ?? "Could not mark this order as served.");
+    }
+}
+
+/**
+ * Ask the database whether a hand-off code is the right one, without ever
+ * reading the code itself (order_secrets is diner-only by RLS). Returns
+ * null when the check function has not been deployed yet.
+ */
+export async function verifyPickupCode(
+    orderId: string,
+    code: string,
+): Promise<boolean | null> {
+    const { data, error } = await supabaseBrowser().rpc("check_order_pickup_code", {
+        p_order: orderId,
+        p_code: code,
+    });
+    if (error) return null; // not deployed / no permission → let mark_served decide
+    const res = data as { ok?: boolean; match?: boolean; reason?: string } | null;
+    if (!res || res.ok !== true) return null;
+    return res.match === true;
+}
+
+// ---------------------------------------------------------------------------
+// Diner queue transparency (how many orders are ahead + ETA)
+// ---------------------------------------------------------------------------
+
+export interface QueueInfo {
+    ahead: number;
+    totalActive: number;
+    etaMinutes: number;
+}
+
+export async function fetchOrderQueueInfo(orderId: string): Promise<QueueInfo | null> {
+    const { data, error } = await supabaseBrowser().rpc("order_queue_info", {
+        p_order: orderId,
+    });
+    if (error) return null;
+    const res = data as
+        | { ok?: boolean; ahead?: number; total_active?: number; eta_minutes?: number }
+        | null;
+    if (!res || res.ok !== true) return null;
+    return {
+        ahead: Number(res.ahead ?? 0),
+        totalActive: Number(res.total_active ?? 0),
+        etaMinutes: Number(res.eta_minutes ?? 0),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Staff account directory (Super Admin only, via SECURITY DEFINER RPC)
+// ---------------------------------------------------------------------------
+
+export interface StaffAccount {
+    id: string;
+    name: string;
+    role: string;
+    isActive: boolean;
+    email: string | null;
+    lastSeen: string | null;
+    createdAt: string | null;
+}
+
+export async function fetchStaffAccounts(): Promise<StaffAccount[]> {
+    const { data, error } = await supabaseBrowser().rpc("admin_staff_accounts");
+    if (error) throw new Error(error.message);
+    return ((data ?? []) as Row[]).map((r) => ({
+        id: String(r.id),
+        name: String(r.name ?? "—"),
+        role: String(r.role ?? ""),
+        isActive: !!r.is_active,
+        email: r.email ? String(r.email) : null,
+        lastSeen: r.last_seen ? String(r.last_seen) : null,
+        createdAt: r.created_at ? String(r.created_at) : null,
+    }));
+}
+
+/**
+ * Reset a staff member's login password via the server route (which holds the
+ * service key). The browser client attaches the caller's bearer token so the
+ * route can confirm they are a Super Admin before it writes to auth.
+ */
+export async function resetStaffPassword(staffUserId: string, newPassword: string): Promise<void> {
+    const sb = supabaseBrowser();
+    const { data } = await sb.auth.getSession();
+    const token = data.session?.access_token;
+    const res = await fetch("/api/admin/staff-password", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ staffUserId, newPassword }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error ?? `Request failed (${res.status}).`);
+    }
 }
 
 /** Diner assigns / changes their table after ordering (moves the order to dine-in). */
@@ -380,6 +496,157 @@ export async function rejectPayment(paymentId: string, reason?: string): Promise
     if (res && res.ok === false && res.reason !== "already_processed") {
         throw new Error("Could not reject this payment request.");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Walk-in / phone orders (cashier POS)
+// ---------------------------------------------------------------------------
+
+export interface WalkInOrderInput {
+    items: { menu_item_id: string; quantity: number }[];
+    fulfillment: "dine_in" | "takeaway";
+    tableId: string | null;
+    phone: string | null;
+    method: "cash" | "transfer";
+    transactionId: string | null;
+    accountId: string | null;
+    serviceMode: "together" | "separate" | "not_applicable";
+    notes: string | null;
+}
+
+export interface WalkInOrderResult {
+    orderId: string;
+    pickupCode: string | null;
+    total: number;
+    transactionId: string | null;
+}
+
+/**
+ * Takes a paid walk-in / phone order through the exact same server pipeline
+ * as a diner-placed one (create_order -> attach proof -> approve_payment),
+ * so tickets, pickup codes and payment history behave identically.
+ * Needs the `create_walk_in_order` RPC (2026-11-06-walkin-pos.sql).
+ */
+export async function createWalkInOrder(input: WalkInOrderInput): Promise<WalkInOrderResult> {
+    const sb = supabaseBrowser();
+    const { data, error } = await sb.rpc("create_walk_in_order", {
+        p_items: input.items,
+        p_fulfillment: input.fulfillment,
+        p_table_id: input.tableId,
+        p_phone: input.phone,
+        p_method: input.method,
+        p_transaction_id: input.transactionId,
+        p_account_id: input.accountId,
+        p_service_mode: input.serviceMode,
+        p_notes: input.notes,
+    });
+    if (error) {
+        if (/could not find the function/i.test(error.message)) {
+            throw new Error(
+                "Walk-in ordering needs one database update. Ask an administrator to run backend/supabase/2026-11-06-walkin-pos.sql in the Supabase SQL editor.",
+            );
+        }
+        throw new Error(error.message);
+    }
+    const res = (data ?? {}) as Record<string, unknown>;
+    if (res.ok === false) {
+        const reasons: Record<string, string> = {
+            forbidden: "You do not have permission to create walk-in orders.",
+            empty_items: "Add at least one dish or drink to the order.",
+            table_required: "Pick a table number for a dine-in walk-in order.",
+            payment_failed: "The order was created but the payment could not be recorded — verify it in the queue.",
+            tx_required: "Enter the bank/Telebirr transaction ID before settling a transfer.",
+            invalid_transaction_id: "Enter the bank/Telebirr transaction ID before settling a transfer.",
+            duplicate_transaction_id: "Duplicate transaction ID — this receipt was already used for another order.",
+            approve_failed: "The order was created but could not be auto-approved — check the payment queue.",
+        };
+        throw new Error(reasons[String(res.reason ?? "")] ?? "Could not create the walk-in order.");
+    }
+    return {
+        orderId: String(res.order_id ?? ""),
+        pickupCode: res.pickup_code ? String(res.pickup_code) : null,
+        total: Number(res.total ?? 0),
+        transactionId: res.transaction_id ? String(res.transaction_id) : null,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Payment history (with the cashier screenshots)
+// ---------------------------------------------------------------------------
+
+export interface PaymentHistoryRow {
+    id: string;
+    orderId: string;
+    orderNumber: string;
+    amount: number;
+    status: string;
+    method: string;
+    transactionId: string | null;
+    rejectReason: string | null;
+    accountLabel: string | null;
+    tableLabel: string | null;
+    fulfillmentType: string | null;
+    orderStatus: string | null;
+    verifiedByName: string | null;
+    createdAt: string;
+    verifiedAt: string | null;
+    proofUrl: string | null;
+}
+
+export type PaymentHistoryRange = "week" | "month" | "all";
+
+const RANGE_DAYS: Record<PaymentHistoryRange, number> = { week: 7, month: 30, all: 0 };
+
+/**
+ * Recent payments with a fresh signed URL for every uploaded screenshot.
+ * Needs the `payment_history` RPC; returns `missingFn` when the migration
+ * has not been applied yet so the UI can say so instead of failing silently.
+ */
+export async function fetchPaymentHistory(
+    range: PaymentHistoryRange = "week",
+): Promise<{ rows: PaymentHistoryRow[]; missingFn: boolean }> {
+    const sb = supabaseBrowser();
+    const { data, error } = await sb.rpc("payment_history", {
+        p_days: RANGE_DAYS[range] ?? 7,
+    });
+    if (error) {
+        if (/could not find the function/i.test(error.message)) {
+            return { rows: [], missingFn: true };
+        }
+        throw new Error(error.message);
+    }
+
+    const rows = (data ?? []) as Row[];
+    const withProof = await Promise.all(
+        rows.map(async (r) => {
+            let proofUrl: string | null = null;
+            if (r.proof_path) {
+                const { data: signed } = await sb.storage
+                    .from("payment-proofs")
+                    .createSignedUrl(String(r.proof_path), 60 * 60);
+                proofUrl = signed?.signedUrl ?? null;
+            }
+            return {
+                id: String(r.id),
+                orderId: String(r.order_id),
+                orderNumber: String(r.order_number ?? ""),
+                amount: Number(r.amount ?? 0),
+                status: String(r.status ?? ""),
+                method: String(r.method ?? ""),
+                transactionId: r.transaction_id ? String(r.transaction_id) : null,
+                rejectReason: r.reject_reason ? String(r.reject_reason) : null,
+                accountLabel: r.account_label ? String(r.account_label) : null,
+                tableLabel: r.table_label ? String(r.table_label) : null,
+                fulfillmentType: r.fulfillment_type ? String(r.fulfillment_type) : null,
+                orderStatus: r.order_status ? String(r.order_status) : null,
+                verifiedByName: r.verified_by_name ? String(r.verified_by_name) : null,
+                createdAt: String(r.created_at),
+                verifiedAt: r.verified_at ? String(r.verified_at) : null,
+                proofUrl,
+            } satisfies PaymentHistoryRow;
+        }),
+    );
+    return { rows: withProof, missingFn: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -606,6 +873,9 @@ export interface Analytics {
     // Every item sold across the full period — powers the CSV export and the
     // best-sellers table beyond the top-5 "today" list.
     itemSales: { name: string; category: string; quantity: number; revenue: number }[];
+    // Real kitchen/bar velocity per product, measured from ticket timestamps
+    // (start preparing → ready). Only items with finished tickets appear.
+    itemPrep: { name: string; avgMinutes: number; samples: number }[];
     peakBucket: string;
 }
 
@@ -714,11 +984,14 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
     let categoryBreakdown: Analytics["categoryBreakdown"] = [];
     let itemSales: Analytics["itemSales"] = [];
     let categorySeries: Analytics["categorySeries"] = [];
+    let itemPrep: Analytics["itemPrep"] = [];
 
     if (ids.length) {
         const { data: itemRows, error: itemErr } = await sb
             .from("order_items")
-            .select("order_id, quantity, unit_price, menu_items(name_i18n, categories(name_i18n))")
+            .select(
+                "order_id, quantity, unit_price, menu_items(name_i18n, categories(name_i18n)), order_station_tickets(started_at, ready_at)",
+            )
             .in("order_id", ids);
         if (itemErr) throw new Error(itemErr.message);
 
@@ -735,6 +1008,9 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
         const byItem = new Map<string, { name: string; orders: number; revenue: number }>();
         const byCat = new Map<string, number>();
         const fullItem = new Map<string, { name: string; category: string; quantity: number; revenue: number }>();
+        // Actual prep velocity per product: minutes between "start preparing"
+        // and "ready" on the ticket that carried this line.
+        const prepMs = new Map<string, { total: number; samples: number }>();
         // cat -> bucket index -> item name -> qty (drives per-category trend + hover).
         const catBucketItems = new Map<string, Map<number, Map<string, number>>>();
         let totalUnits = 0;
@@ -775,6 +1051,19 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
                 const perItem = perBucket.get(idx)!;
                 perItem.set(name, (perItem.get(name) ?? 0) + qty);
             }
+
+            // Kitchen/bar velocity for this product.
+            const tk = Array.isArray(r.order_station_tickets)
+                ? r.order_station_tickets[0]
+                : r.order_station_tickets;
+            const started = tk?.started_at ? new Date(String(tk.started_at)).getTime() : NaN;
+            const ready = tk?.ready_at ? new Date(String(tk.ready_at)).getTime() : NaN;
+            if (Number.isFinite(started) && Number.isFinite(ready) && ready > started) {
+                const agg = prepMs.get(name) ?? { total: 0, samples: 0 };
+                agg.total += (ready - started) / 60000;
+                agg.samples += 1;
+                prepMs.set(name, agg);
+            }
         });
 
         // Rank by units sold (most-sold items first), tie-broken by revenue.
@@ -800,6 +1089,14 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
                 quantity: x.quantity,
                 revenue: Math.round(x.revenue),
             }));
+
+        itemPrep = [...prepMs.entries()]
+            .map(([name, v]) => ({
+                name,
+                avgMinutes: Math.round(v.total / v.samples),
+                samples: v.samples,
+            }))
+            .sort((a, b) => b.avgMinutes - a.avgMinutes);
 
         // Top 3 categories by units sold → one line each on the volume chart.
         categorySeries = [...byCat.entries()]
@@ -834,6 +1131,7 @@ export async function fetchAnalytics(period: AnalyticsPeriod): Promise<Analytics
         ordersSeries,
         categorySeries,
         itemSales,
+        itemPrep,
         peakBucket,
     };
 }

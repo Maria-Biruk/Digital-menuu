@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Check, X, Eye, AlertTriangle, FileImage, ExternalLink } from 'lucide-react';
 import { Payment } from '../lib/types';
 import { orderNumber } from '../lib/order-number';
+import { useT } from '../lib/i18n/staff';
 
 interface PaymentVerificationQueueProps {
   payments: Payment[];
@@ -20,6 +21,7 @@ export default function PaymentVerificationQueue({
   existingTxIds = ['CBE-TX-998124'],
   className = '',
 }: PaymentVerificationQueueProps) {
+  const t = useT();
   const [modalImageUrl, setModalImageUrl] = useState<string | null>(null);
   const [txInputs, setTxInputs] = useState<Record<string, string>>({});
 
@@ -41,10 +43,10 @@ export default function PaymentVerificationQueue({
     return (
       <div className={`text-center py-16 p-6 rounded-3xl bg-[#3A241A]/40 border border-stone-800 text-stone-400 ${className}`}>
         <p className="font-serif text-base font-bold text-stone-200">
-          No Pending Payment Verifications
+          {t('No Pending Payment Verifications')}
         </p>
         <p className="text-xs text-stone-500 mt-1">
-          Incoming mobile transfers and customer receipts will appear here in real time.
+          {t('Incoming mobile transfers and customer receipts will appear here in real time.')}
         </p>
       </div>
     );
@@ -76,7 +78,7 @@ export default function PaymentVerificationQueue({
                       )
                     }
                     className="relative w-14 h-14 rounded-2xl overflow-hidden bg-stone-900 border border-stone-700 cursor-pointer group shrink-0"
-                    title="Click to view full receipt"
+                    title={t('Click to view full receipt')}
                   >
                     {payment.proof_image ? (
                       <img
@@ -97,14 +99,14 @@ export default function PaymentVerificationQueue({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-mono font-bold text-sm text-white">
-                        Order #{orderNumber(payment.order_id)}
+                        {t('Order #')} {orderNumber(payment.order_id)}
                       </span>
                       <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
                         {payment.account_label.split(' ')[0]}
                       </span>
                     </div>
                     <p className="text-xs text-stone-400 mt-0.5">
-                      Account: {payment.account_label}
+                      {t('Account:')} {payment.account_label}
                     </p>
                     <p className="text-sm font-bold text-emerald-400 mt-0.5">
                       {payment.amount.toLocaleString()} ETB
@@ -117,7 +119,7 @@ export default function PaymentVerificationQueue({
                   <div className="relative">
                     <input
                       type="text"
-                      placeholder="Enter Bank TX ID..."
+                      placeholder={t('Enter Bank TX ID...')}
                       value={currentTx}
                       onChange={(e) => handleTxChange(payment.id, e.target.value)}
                       className={`w-full sm:w-56 px-3.5 py-2 rounded-xl border text-xs font-mono bg-[#38210F] text-white focus:outline-none ${
@@ -129,7 +131,7 @@ export default function PaymentVerificationQueue({
                       }`}
                     />
                     {txMissing && !hasDuplicateWarning && (
-                      <p className="text-[10px] text-amber-400/90 font-medium mt-1">Bank TX ID is required to approve.</p>
+                      <p className="text-[10px] text-amber-400/90 font-medium mt-1">{t('Bank TX ID is required to approve.')}</p>
                     )}
                   </div>
 
@@ -139,21 +141,21 @@ export default function PaymentVerificationQueue({
                       onClick={() => onReject(payment.id)}
                       className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl border border-stone-800 hover:bg-rose-950/40 text-rose-400 hover:border-rose-900/50 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
                     >
-                      <X size={14} /> Reject
+                      <X size={14} /> {t('Reject')}
                     </button>
 
                     <button
                       type="button"
                       disabled={txMissing || hasDuplicateWarning}
                       onClick={() => onApprove(payment.id, currentTx)}
-                      title={txMissing ? 'Enter the bank transaction ID first' : 'Approve and issue pickup code'}
+                      title={txMissing ? t('Enter the bank transaction ID first') : t('Approve and issue pickup code')}
                       className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow ${
                         txMissing || hasDuplicateWarning
                           ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
                           : 'bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95 cursor-pointer'
                       }`}
                     >
-                      <Check size={14} /> Approve & Issue Code
+                      <Check size={14} /> {t('Approve & Issue Code')}
                     </button>
                   </div>
                 </div>
@@ -164,7 +166,7 @@ export default function PaymentVerificationQueue({
                 <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-600/60 text-xs text-rose-200 flex items-center gap-2 animate-shake">
                   <AlertTriangle size={16} className="text-rose-400 shrink-0" />
                   <span>
-                    <strong>Duplicate Warning:</strong> This transaction ID has already been used for another order! Please double-check the customer screenshot.
+                    <strong>{t('Duplicate Warning:')}</strong> {t('This transaction ID has already been used for another order! Please double-check the customer screenshot.')}
                   </span>
                 </div>
               )}
@@ -179,7 +181,7 @@ export default function PaymentVerificationQueue({
           <div className="relative max-w-lg w-full bg-[#3A241A] rounded-3xl p-5 border border-stone-700 shadow-2xl">
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-stone-800">
               <h4 className="font-serif text-sm font-bold text-white">
-                Payment Transfer Screenshot
+                {t('Payment Transfer Screenshot')}
               </h4>
               <button
                 type="button"

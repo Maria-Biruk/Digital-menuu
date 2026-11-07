@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import {
   DollarSign,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   BarChart3,
   TrendingUp,
   Flame,
+  Timer,
 } from 'lucide-react';
 
 interface TopSeller {
@@ -44,6 +45,12 @@ interface ItemSale {
   revenue: number;
 }
 
+interface ItemPrepStat {
+  name: string;
+  avgMinutes: number;
+  samples: number;
+}
+
 interface AnalyticsSummaryProps {
   grossRevenue?: number;
   completedOrders?: number;
@@ -55,6 +62,7 @@ interface AnalyticsSummaryProps {
   ordersSeries?: SeriesPoint[];
   categorySeries?: CategorySeriesLine[];
   itemSales?: ItemSale[];
+  itemPrep?: ItemPrepStat[];
   peakBucket?: string;
   period?: 'today' | 'week' | 'month' | 'year';
   loading?: boolean;
@@ -64,17 +72,17 @@ interface AnalyticsSummaryProps {
 const PALETTE = ['#f59e0b', '#10b981', '#06b6d4', '#a78bfa', '#fb7185'];
 
 function periodSuffix(period: 'today' | 'week' | 'month' | 'year') {
+  const year = new Date().getFullYear();
   return period === 'today'
-    ? ' by Hour (Today)'
+    ? ` by Hour (Today · ${year})`
     : period === 'week'
-    ? ' by Day (This Week)'
+    ? ` by Day (This Week · ${year})`
     : period === 'month'
-    ? ' by Day (This Month)'
-    : ' by Month (This Year)';
+    ? ` by Day (This Month · ${year})`
+    : ` by Month (${year})`;
 }
 
-/** Dependency-free SVG BAR chart for revenue (kept distinct from the order
- *  volume line chart so the two never duplicate the same series). */
+/** Dependency-free SVG BAR chart for revenue. */
 function RevenueBars({ series, period }: { series: SeriesPoint[]; period: 'today' | 'week' | 'month' | 'year' }) {
   const data = series ?? [];
   const max = Math.max(1, ...data.map((d) => d.value));
@@ -149,168 +157,6 @@ function RevenueBars({ series, period }: { series: SeriesPoint[]; period: 'today
   );
 }
 
-/**
- * Interactive order-volume chart. Draws one line per top category (up to 3)
- * over the shared time buckets; hovering a column reveals, for that exact
- * hour/day, the total orders and each category's top-3 selling items + qty.
- */
-function OrdersChart({
-  ordersSeries,
-  categorySeries,
-  period,
-}: {
-  ordersSeries: SeriesPoint[];
-  categorySeries: CategorySeriesLine[];
-  period: 'today' | 'week' | 'month' | 'year';
-}) {
-  const [hover, setHover] = useState<number | null>(null);
-
-  const labels = ordersSeries?.length
-    ? ordersSeries.map((d) => d.label)
-    : categorySeries[0]?.points.map((_, i) => `${i}`) ?? [];
-  const n = labels.length || 1;
-
-  const series = categorySeries ?? [];
-  // Fall back to the aggregate order line when no category breakdown exists.
-  const lines: { name: string; color: string; points: number[] }[] = series.length
-    ? series.map((s, i) => ({ name: s.name, color: PALETTE[i % PALETTE.length], points: s.points }))
-    : [{ name: 'Orders', color: '#f59e0b', points: (ordersSeries ?? []).map((d) => d.value) }];
-
-  const max = Math.max(1, ...lines.flatMap((l) => l.points), ...ordersSeries.map((d) => d.value));
-
-  const W = 720;
-  const H = 260;
-  const padX = 10;
-  const padTop = 18;
-  const padBottom = 30;
-  const innerW = W - padX * 2;
-  const innerH = H - padTop - padBottom;
-  const slot = innerW / n;
-  const px = (i: number) => padX + slot * i + slot / 2;
-  const py = (v: number) => padTop + innerH - (v / max) * innerH;
-  const labelStep = period === 'today' ? 2 : period === 'month' ? 5 : period === 'week' ? 1 : 1;
-  const hasData = ordersSeries.some((d) => d.value > 0) || lines.some((l) => l.points.some((v) => v > 0));
-
-  return (
-    <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-[260px]" preserveAspectRatio="none">
-        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-          const y = padTop + innerH * t;
-          return <line key={t} x1={padX} x2={W - padX} y1={y} y2={y} stroke="#2B1810" strokeWidth={1} strokeDasharray="3 5" />;
-        })}
-
-        {/* Hover guide line */}
-        {hover !== null && (
-          <line x1={px(hover)} x2={px(hover)} y1={padTop} y2={padTop + innerH} stroke="#f59e0b" strokeOpacity={0.35} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-        )}
-
-        {lines.map((line) => {
-          const path = line.points.map((v, i) => `${i === 0 ? 'M' : 'L'} ${px(i)} ${py(v)}`).join(' ');
-          return (
-            <g key={line.name}>
-              <path d={path} fill="none" stroke={line.color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-              {line.points.map((v, i) => (
-                <circle
-                  key={i}
-                  cx={px(i)}
-                  cy={py(v)}
-                  r={hover === i ? 4.5 : 3}
-                  fill="#3A241A"
-                  stroke={line.color}
-                  strokeWidth={2}
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-            </g>
-          );
-        })}
-
-        {/* Invisible hover columns capture the bucket under the cursor */}
-        {labels.map((_, i) => (
-          <rect
-            key={i}
-            x={padX + slot * i}
-            y={padTop}
-            width={slot}
-            height={innerH}
-            fill="transparent"
-            onMouseEnter={() => setHover(i)}
-            onMouseLeave={() => setHover((cur) => (cur === i ? null : cur))}
-          />
-        ))}
-      </svg>
-
-      {/* Legend */}
-      {series.length > 0 && (
-        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 mt-1">
-          {lines.map((l) => (
-            <span key={l.name} className="flex items-center gap-1.5 text-[11px] text-stone-300 font-medium">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />
-              {l.name}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* X-axis labels */}
-      <div className="flex justify-between px-1 mt-1">
-        {labels.map((label, i) => (
-          <span key={i} className="text-[9px] text-stone-500 font-mono" style={{ flex: '1 1 0', textAlign: 'center' }}>
-            {i % labelStep !== 0 ? '' : label}
-          </span>
-        ))}
-      </div>
-
-      {/* Hover tooltip */}
-      {hover !== null && hasData && (
-        <div
-          className="pointer-events-none absolute top-2 z-10 w-56 -translate-x-1/2 rounded-2xl bg-[#2B1810]/95 border border-amber-500/40 shadow-2xl p-3 backdrop-blur"
-          style={{ left: `${((hover + 0.5) / n) * 100}%` }}
-        >
-          <p className="text-[11px] font-bold text-amber-300 mb-1.5">
-            {labels[hover]} · {ordersSeries[hover]?.value ?? 0} order{(ordersSeries[hover]?.value ?? 0) === 1 ? '' : 's'}
-          </p>
-          <div className="space-y-2">
-            {series.length === 0 && (
-              <p className="text-[11px] text-stone-300">Total volume for this slot.</p>
-            )}
-            {series.map((cat, ci) => {
-              const items = cat.topItemsByBucket?.[hover] ?? [];
-              return (
-                <div key={cat.name}>
-                  <p className="flex items-center gap-1.5 text-[11px] font-semibold text-stone-200">
-                    <span className="w-2 h-2 rounded-full" style={{ background: PALETTE[ci % PALETTE.length] }} />
-                    {cat.name}
-                    <span className="ml-auto text-stone-400 font-mono">{cat.points[hover] ?? 0}</span>
-                  </p>
-                  {items.length > 0 ? (
-                    <ul className="mt-0.5 space-y-0.5 pl-3.5">
-                      {items.map((it, k) => (
-                        <li key={k} className="text-[10px] text-stone-400 flex justify-between gap-2">
-                          <span className="truncate">{k + 1}. {it.name}</span>
-                          <span className="text-amber-300/90 font-mono shrink-0">{it.qty}x</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="pl-3.5 text-[10px] text-stone-600 italic">No sales</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {!hasData && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-xs text-stone-500 italic">No order activity recorded for this period yet.</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function AnalyticsSummary({
   grossRevenue = 0,
   completedOrders = 0,
@@ -322,6 +168,7 @@ export default function AnalyticsSummary({
   ordersSeries = [],
   categorySeries = [],
   itemSales = [],
+  itemPrep = [],
   peakBucket = '—',
   period = 'today',
   loading = false,
@@ -390,20 +237,6 @@ export default function AnalyticsSummary({
             <p className="text-sm font-serif font-bold text-white truncate">{totalItemsSold.toLocaleString()} across {itemSales.length} SKUs</p>
           </div>
         </div>
-      </div>
-
-      {/* Order Volume multi-category line chart (the selling-point analytics) */}
-      <div className="p-6 rounded-3xl bg-[#3A241A] border border-stone-800 space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-stone-800">
-          <div className="flex items-center gap-2">
-            <TrendingUp size={18} className="text-amber-500" />
-            <h3 className="font-serif font-bold text-base text-white">
-              Order Volume{periodSuffix(period)}
-            </h3>
-          </div>
-          <span className="text-[10px] uppercase font-bold text-stone-500">Hover a column for top items</span>
-        </div>
-        <OrdersChart ordersSeries={ordersSeries} categorySeries={categorySeries} period={period} />
       </div>
 
       {/* Revenue bar chart */}
@@ -531,6 +364,41 @@ export default function AnalyticsSummary({
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Average prep / delivery time per product */}
+      {itemPrep.length > 0 && (
+        <div className="p-6 rounded-3xl bg-[#3A241A] border border-stone-800 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-800">
+            <div className="flex items-center gap-2">
+              <Timer size={18} className="text-cyan-400" />
+              <h3 className="font-serif font-bold text-base text-white">Average Prep / Delivery Time</h3>
+            </div>
+            <span className="text-[10px] uppercase font-bold text-stone-500">Kitchen Velocity</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {itemPrep.map((p) => (
+              <div key={p.name} className="p-3.5 rounded-2xl bg-[#38210F] border border-stone-800/80 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-serif text-sm font-bold text-white truncate">{p.name}</p>
+                  <p className="text-[11px] text-stone-500">{p.samples} completed order{p.samples === 1 ? '' : 's'}</p>
+                </div>
+                <span
+                  className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-bold font-mono ${
+                    p.avgMinutes <= 10
+                      ? 'bg-emerald-500/15 text-emerald-300'
+                      : p.avgMinutes <= 20
+                      ? 'bg-amber-500/15 text-amber-300'
+                      : 'bg-rose-500/15 text-rose-300'
+                  }`}
+                >
+                  {p.avgMinutes} min
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
