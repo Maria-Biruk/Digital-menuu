@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from "react";
 import {
   X,
   CheckCircle2,
@@ -11,10 +11,10 @@ import {
   ShoppingBag,
   AlertCircle,
   Loader2,
-} from 'lucide-react';
-import { setTicketStatus } from '../lib/db';
-import { orderNumber } from '../lib/order-number';
-import type { Ticket, TicketStatus } from '../lib/types';
+} from "lucide-react";
+import { setTicketStatus } from "../lib/db";
+import { orderNumber } from "../lib/order-number";
+import type { Ticket, TicketStatus } from "../lib/types";
 
 interface ApprovedOrderModalProps {
   orderId: string;
@@ -29,8 +29,8 @@ const STATION_META: Record<
   string,
   { label: string; icon: typeof ChefHat; accent: string }
 > = {
-  kitchen: { label: 'Hot Kitchen', icon: ChefHat, accent: 'text-amber-400' },
-  bar: { label: 'Bar Station', icon: Wine, accent: 'text-purple-400' },
+  kitchen: { label: "Hot Kitchen", icon: ChefHat, accent: "text-amber-400" },
+  bar: { label: "Bar Station", icon: Wine, accent: "text-purple-400" },
 };
 
 export default function ApprovedOrderModal({
@@ -46,9 +46,9 @@ export default function ApprovedOrderModal({
   const [error, setError] = useState<string | null>(null);
   // The cashier must explicitly dispatch the order; don't auto-mark it sent.
   const [dispatched, setDispatched] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
+    if (typeof window === "undefined") return false;
     try {
-      return localStorage.getItem(`dm_dispatched_${orderId}`) === '1';
+      return localStorage.getItem(`dm_dispatched_${orderId}`) === "1";
     } catch {
       return false;
     }
@@ -57,13 +57,13 @@ export default function ApprovedOrderModal({
   // Close on Escape.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === "Escape") onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const tableLabel = tickets[0]?.table_label ?? '—';
+  const tableLabel = tickets[0]?.table_label ?? "—";
   const isTakeaway = /take/i.test(tableLabel);
 
   const totalItems = useMemo(
@@ -79,24 +79,28 @@ export default function ApprovedOrderModal({
     setError(null);
     setSending(true);
     try {
-      const held = tickets.filter((t) => t.status === 'held');
+      const held = tickets.filter((t) => t.status === "held");
       for (const t of held) {
-        await setTicketStatus(t.id, 'preparing' as TicketStatus);
+        await setTicketStatus(t.id, "preparing" as TicketStatus);
       }
       if (held.length) {
         setTickets((prev) =>
-          prev.map((t) => (t.status === 'held' ? { ...t, status: 'preparing' } : t)),
+          prev.map((t) =>
+            t.status === "held" ? { ...t, status: "preparing" } : t,
+          ),
         );
       }
       setDispatched(true);
       try {
-        localStorage.setItem(`dm_dispatched_${orderId}`, '1');
+        localStorage.setItem(`dm_dispatched_${orderId}`, "1");
       } catch {
         // Storage unavailable (private mode); state still updates in memory.
       }
       onSent?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send to kitchen.');
+      setError(
+        err instanceof Error ? err.message : "Failed to send to kitchen.",
+      );
     } finally {
       setSending(false);
     }
@@ -134,7 +138,7 @@ export default function ApprovedOrderModal({
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 rounded-2xl bg-[#38210F] border border-[#2B1810]">
               <p className="text-[10px] uppercase tracking-wider text-stone-500 mb-1">
-                {isTakeaway ? 'Fulfillment' : 'Table'}
+                {isTakeaway ? "Fulfillment" : "Table"}
               </p>
               <div className="flex items-center gap-2 text-white font-bold text-sm">
                 {isTakeaway ? (
@@ -162,7 +166,7 @@ export default function ApprovedOrderModal({
                 Order Details
               </p>
               <span className="text-[11px] text-stone-500">
-                {totalItems} item{totalItems === 1 ? '' : 's'}
+                {totalItems} item{totalItems === 1 ? "" : "s"}
               </span>
             </div>
 
@@ -174,7 +178,6 @@ export default function ApprovedOrderModal({
               tickets.map((t) => {
                 const meta = STATION_META[t.station] ?? STATION_META.kitchen;
                 const Icon = meta.icon;
-                const sent = dispatched || t.status !== 'held';
                 return (
                   <div
                     key={t.id}
@@ -187,15 +190,6 @@ export default function ApprovedOrderModal({
                           {meta.label}
                         </span>
                       </div>
-                      <span
-                        className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
-                          sent
-                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                            : 'bg-stone-800 text-stone-300 border-stone-700'
-                        }`}
-                      >
-                        {sent ? 'In Kitchen' : 'On Hold'}
-                      </span>
                     </div>
 
                     <ul className="space-y-1.5">
@@ -207,7 +201,7 @@ export default function ApprovedOrderModal({
                           <span className="text-stone-200">
                             <span className="font-bold text-amber-400">
                               {item.quantity}x
-                            </span>{' '}
+                            </span>{" "}
                             {item.name}
                           </span>
                           {item.notes && (
@@ -252,7 +246,7 @@ export default function ApprovedOrderModal({
                 </>
               ) : (
                 <>
-                  <Send className="w-4 h-4" /> Send to Kitchen
+                  <Send className="w-4 h-4" /> Approve &amp; Send to Kitchen
                 </>
               )}
             </button>

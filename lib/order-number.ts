@@ -9,21 +9,23 @@
  */
 const registry = new Map<string, number>();
 
-export function registerOrderNumbers(entries: { orderId: string; seq: number }[]): void {
+export function registerOrderNumbers(
+  entries: { orderId: string; seq: number }[],
+): void {
   for (const e of entries) registry.set(e.orderId, e.seq);
 }
 
 export function orderNumber(orderId: string | null | undefined): string {
-  if (!orderId) return '—';
+  if (!orderId) return "—";
   const seq = registry.get(orderId);
-  if (seq !== undefined) return String(seq);
+  if (seq !== undefined) return String(((seq - 1) % 100) + 1);
   // Fallback while the registry is still loading (or for mock order ids):
   // the previous stable hash code, so a number is always visible.
-  const id = String(orderId).replace(/^ord-/, '');
+  const id = String(orderId).replace(/^ord-/, "");
   let h = 0x811c9dc5;
   for (let i = 0; i < id.length; i++) {
     h ^= id.charCodeAt(i);
     h = Math.imul(h, 0x01000193) >>> 0;
   }
-  return String(1000 + (h % 9000));
+  return String((((h % 100) + 100) % 100) + 1);
 }

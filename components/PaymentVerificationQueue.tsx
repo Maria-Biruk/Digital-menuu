@@ -148,14 +148,14 @@ export default function PaymentVerificationQueue({
                       type="button"
                       disabled={txMissing || hasDuplicateWarning}
                       onClick={() => onApprove(payment.id, currentTx)}
-                      title={txMissing ? t('Enter the bank transaction ID first') : t('Approve and issue pickup code')}
+                      title={txMissing ? t('Enter the bank transaction ID first') : t('Approve and send the order to the kitchen')}
                       className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow ${
                         txMissing || hasDuplicateWarning
                           ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
                           : 'bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95 cursor-pointer'
                       }`}
                     >
-                      <Check size={14} /> {t('Approve & Issue Code')}
+                      <Check size={14} /> {t('Approve & Send to Kitchen')}
                     </button>
                   </div>
                 </div>

@@ -38,7 +38,7 @@ export function playChime(): void {
   }
 }
 
-/** Ask for Notification API permission once, from a user gesture or mount. */
+/** Ask for Notification API permission from a notification-bell click. */
 export async function ensureNotifyPermission(): Promise<boolean> {
   if (typeof window === 'undefined' || !('Notification' in window)) return false;
   if (Notification.permission === 'granted') return true;
@@ -50,8 +50,46 @@ export async function ensureNotifyPermission(): Promise<boolean> {
   }
 }
 
+export interface DinerNotification {
+  id: string;
+  text: string;
+  read: boolean;
+  ts: number;
+}
+
+/** Save order updates in the menu's notification inbox and sync open tabs. */
+export function saveDinerNotification(notification: DinerNotification): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const saved = localStorage.getItem('dm_order_notifications');
+    const parsed: unknown = saved ? JSON.parse(saved) : [];
+    const existing = Array.isArray(parsed)
+      ? (parsed as DinerNotification[])
+      : [];
+    if (existing.some((item) => item.id === notification.id)) return;
+    localStorage.setItem(
+      'dm_order_notifications',
+      JSON.stringify([notification, ...existing].slice(0, 20)),
+    );
+    window.dispatchEvent(
+      new CustomEvent('diner-order-notification', { detail: notification }),
+    );
+  } catch (error) {
+    console.error('Could not save diner order notification', error);
+  }
+}
+
+/** Add a staff alert to the active station header's persistent notification inbox. */
+export function publishStaffNotification(title: string, message: string): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('staff-notify', { detail: { title, message } }),
+  );
+}
+
 /** Fire a desktop/mobile push-style notification if the browser allows it. */
 export function pushNotification(title: string, body?: string): void {
+  if (typeof window === 'undefined') return;
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(title, { body, icon: '/skill-coffee-icon.png' });
@@ -99,9 +137,8 @@ export function useNewArrivalNotifier<T>(
     const text = fresh.length > 1 ? `${message} (+${fresh.length - 1} more)` : message;
 
     playChime();
-    void ensureNotifyPermission().then((ok) => {
-      if (ok) pushNotification(title, text);
-    });
+    pushNotification(title, text);
+    publishStaffNotification(title, text);
     setToast({ message: text, kind: 'info' });
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setToast(null), 7000);

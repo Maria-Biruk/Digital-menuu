@@ -92,12 +92,8 @@ function WaiterFloorContent() {
   }, [loadTickets, loadCalls, loadActivity]);
 
   const handleMarkServed = async (orderId: string, code: string) => {
-    try {
-      await markOrderServed(orderId, code);
-      await loadTickets();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : t("Failed to mark order served"));
-    }
+    await markOrderServed(orderId, code);
+    void loadTickets();
   };
 
   const handleAcknowledgeAlert = async (alertId: string) => {
@@ -128,8 +124,7 @@ function WaiterFloorContent() {
       <NotificationToast toast={callToast ?? readyToast} onDismiss={() => { dismissCall(); dismissReady(); }} />
       <StaffHeader
         title={t("Floor Service Console")}
-        subtitle={t("Dining Room & Delivery")}
-        badge={t("Waiter Active")}
+        subtitle=""
         icon={<UserCheck className="w-5 h-5 text-amber-400" />}
       />
 

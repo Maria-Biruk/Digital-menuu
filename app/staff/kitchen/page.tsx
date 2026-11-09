@@ -12,6 +12,7 @@ import { fetchStationTickets, subscribeTickets, setTicketStatus, setItemAvailabi
 import { Ticket, TicketStatus, MenuItem } from "@/lib/types";
 import { signOutStaff } from "@/lib/supabase";
 import { loc, useStaffLang } from "@/lib/i18n/staff";
+import { publishStaffNotification } from "@/lib/notify";
 import { UtensilsCrossed, ToggleLeft, ToggleRight, Sparkles, RefreshCw, ShieldAlert, Lock, ArrowLeft } from "lucide-react";
 
 import RoleGuard from "@/components/RoleGuard";
@@ -75,6 +76,12 @@ function KitchenConsoleContent() {
     else return; // already ready
     try {
       await setTicketStatus(ticketId, nextStatus);
+      if (nextStatus === "preparing") {
+        publishStaffNotification(
+          t("Order Started"),
+          `#${orderNumber(ticket.order_id)} · ${t("Order is being prepared.")}`,
+        );
+      }
       await loadTickets();
     } catch (err) {
       console.error("Failed to advance ticket", err);
@@ -144,8 +151,7 @@ function KitchenConsoleContent() {
       <NotificationToast toast={arrivalToast} onDismiss={dismissToast} />
       <StaffHeader
         title={t("Kitchen Console")}
-        subtitle={t("Hot Station & Cook Line")}
-        badge={t("Live Prep Feed")}
+        subtitle=""
         icon={<UtensilsCrossed className="w-5 h-5 text-amber-400" />}
       />
 

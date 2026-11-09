@@ -1,4 +1,4 @@
-import { supabaseBrowser } from "./supabase";
+import { supabaseBrowser, supabaseDiner } from "./supabase";
 import { registerOrderNumbers } from "./order-number";
 import type {
     Category,
@@ -17,23 +17,24 @@ type Row = Record<string, any>;
 export async function fetchCatalog(): Promise<{ categories: Category[]; menu: MenuItem[] }> {
     const sb = supabaseBrowser();
 
-    const { data: cats, error: catErr } = await sb
-        .from("categories")
-        .select("id, slug, name_i18n, sort_order")
-        .eq("is_active", true)
-        .order("sort_order");
+    const [{ data: cats, error: catErr }, { data: items, error: itemErr }] = await Promise.all([
+        sb
+            .from("categories")
+            .select("id, slug, name_i18n, sort_order")
+            .eq("is_active", true)
+            .order("sort_order"),
+        sb
+            .from("menu_items")
+            .select(
+                "id, category_id, name_i18n, description_i18n, price, image_path, dietary_tags, station, avg_prep_minutes, is_available, calories, ingredients, rating, tag, sort_order",
+            )
+            .order("sort_order"),
+    ]);
     if (catErr) throw new Error(catErr.message);
+    if (itemErr) throw new Error(itemErr.message);
 
     const categories = (cats ?? []) as Category[];
     const activeIds = new Set(categories.map((c) => c.id));
-
-    const { data: items, error: itemErr } = await sb
-        .from("menu_items")
-        .select(
-            "id, category_id, name_i18n, description_i18n, price, image_path, dietary_tags, station, avg_prep_minutes, is_available, calories, ingredients, rating, tag, sort_order",
-        )
-        .order("sort_order");
-    if (itemErr) throw new Error(itemErr.message);
 
     const menu: MenuItem[] = ((items ?? []) as Row[])
         .filter((r) => activeIds.has(r.category_id))
@@ -81,11 +82,15 @@ export async function fetchTables(): Promise<Table[]> {
     const { data, error } = await supabaseBrowser()
         .from("restaurant_tables")
         .select("id, label")
-        .order("label");
+        .order("label")
+        .order("id");
     if (error) throw new Error(error.message);
-    return ((data ?? []) as Row[]).map((r) => ({
+    const rows = (data ?? []) as Row[];
+    const labels = rows.map((r) => String(r.label ?? ""));
+    const hasDuplicateLabels = new Set(labels).size !== labels.length;
+    return rows.map((r, index) => ({
         id: r.id,
-        label: String(r.label ?? ""),
+        label: hasDuplicateLabels ? String(index + 1) : labels[index],
     }));
 }
 
@@ -309,7 +314,7 @@ export interface QueueInfo {
 }
 
 export async function fetchOrderQueueInfo(orderId: string): Promise<QueueInfo | null> {
-    const { data, error } = await supabaseBrowser().rpc("order_queue_info", {
+    const { data, error } = await supabaseDiner().rpc("order_queue_info", {
         p_order: orderId,
     });
     if (error) return null;
@@ -377,7 +382,7 @@ export async function resetStaffPassword(staffUserId: string, newPassword: strin
 
 /** Diner assigns / changes their table after ordering (moves the order to dine-in). */
 export async function setOrderTable(orderId: string, tableId: string): Promise<void> {
-    const { data, error } = await supabaseBrowser().rpc("set_order_table", {
+    const { data, error } = await supabaseDiner().rpc("set_order_table", {
         p_order: orderId,
         p_table: tableId,
     });
@@ -439,6 +444,20 @@ export function subscribePayments(onChange: () => void): () => void {
     const channel = sb
         .channel("payments-feed")
         .on("postgres_changes", { event: "*", schema: "public", table: "payments" }, onChange)
+        .subscribe();
+    return () => {
+        void sb.removeChannel(channel);
+    };
+}
+
+export function subscribeNewOrders(onOrder: (orderId: string) => void): () => void {
+    const sb = supabaseBrowser();
+    const channel = sb
+        .channel("cashier-new-orders")
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, (payload) => {
+            const orderId = (payload.new as Row | undefined)?.id;
+            if (typeof orderId === "string") onOrder(orderId);
+        })
         .subscribe();
     return () => {
         void sb.removeChannel(channel);
@@ -599,54 +618,160 @@ const RANGE_DAYS: Record<PaymentHistoryRange, number> = { week: 7, month: 30, al
 
 /**
  * Recent payments with a fresh signed URL for every uploaded screenshot.
- * Needs the `payment_history` RPC; returns `missingFn` when the migration
- * has not been applied yet so the UI can say so instead of failing silently.
+ * Tries the `payment_history` RPC first (which includes order context and
+ * signed proof URLs). When the RPC is missing it falls back to a direct
+ * JOIN query against `payments` + `orders` so the page always shows data.
  */
 export async function fetchPaymentHistory(
     range: PaymentHistoryRange = "week",
 ): Promise<{ rows: PaymentHistoryRow[]; missingFn: boolean }> {
     const sb = supabaseBrowser();
-    const { data, error } = await sb.rpc("payment_history", {
+
+    // ── 1. Try the RPC ────────────────────────────────────────────────────────
+    const { data: rpcData, error: rpcError } = await sb.rpc("payment_history", {
         p_days: RANGE_DAYS[range] ?? 7,
     });
-    if (error) {
-        if (/could not find the function/i.test(error.message)) {
-            return { rows: [], missingFn: true };
-        }
-        throw new Error(error.message);
+
+    if (!rpcError) {
+        // RPC succeeded — enrich with signed screenshot URLs.
+        const rows = (rpcData ?? []) as Row[];
+        const withProof = await Promise.all(
+            rows.map(async (r) => {
+                let proofUrl: string | null = null;
+                if (r.proof_path) {
+                    const { data: signed } = await sb.storage
+                        .from("payment-proofs")
+                        .createSignedUrl(String(r.proof_path), 60 * 60);
+                    proofUrl = signed?.signedUrl ?? null;
+                }
+                return {
+                    id: String(r.id),
+                    orderId: String(r.order_id),
+                    orderNumber: String(r.order_number ?? ""),
+                    amount: Number(r.amount ?? 0),
+                    status: String(r.status ?? ""),
+                    method: String(r.method ?? ""),
+                    transactionId: r.transaction_id ? String(r.transaction_id) : null,
+                    rejectReason: r.reject_reason ? String(r.reject_reason) : null,
+                    accountLabel: r.account_label ? String(r.account_label) : null,
+                    tableLabel: r.table_label ? String(r.table_label) : null,
+                    fulfillmentType: r.fulfillment_type ? String(r.fulfillment_type) : null,
+                    orderStatus: r.order_status ? String(r.order_status) : null,
+                    verifiedByName: r.verified_by_name ? String(r.verified_by_name) : null,
+                    createdAt: String(r.created_at),
+                    verifiedAt: r.verified_at ? String(r.verified_at) : null,
+                    proofUrl,
+                } satisfies PaymentHistoryRow;
+            }),
+        );
+        return { rows: withProof, missingFn: false };
     }
 
-    const rows = (data ?? []) as Row[];
-    const withProof = await Promise.all(
-        rows.map(async (r) => {
+    // If the error is NOT a missing-function error, surface it.
+    if (!/could not find the function/i.test(rpcError.message)) {
+        throw new Error(rpcError.message);
+    }
+
+    // ── 2. RPC missing — fall back to a direct table query ───────────────────
+    // Build the date filter for the range.
+    const days = RANGE_DAYS[range] ?? 7;
+    let query = sb
+        .from("payments")
+        .select(`
+            id,
+            order_id,
+            amount,
+            status,
+            method,
+            transaction_id,
+            reject_reason,
+            proof_image_path,
+            verified_at,
+            created_at,
+            orders!inner (
+                status,
+                fulfillment_type,
+                created_at,
+                table_id,
+                restaurant_tables ( label )
+            ),
+            payment_accounts ( label )
+        `)
+        .order("created_at", { ascending: false })
+        .limit(500);
+
+    if (days > 0) {
+        const since = new Date(Date.now() - days * 86400_000).toISOString();
+        query = query.gte("created_at", since);
+    }
+
+    const { data: fallbackData, error: fallbackError } = await query;
+    if (fallbackError) {
+        // Try without created_at filter — column may not exist yet.
+        const { data: fallbackData2, error: fallbackError2 } = await sb
+            .from("payments")
+            .select(`
+                id,
+                order_id,
+                amount,
+                status,
+                method,
+                transaction_id,
+                reject_reason,
+                proof_image_path,
+                verified_at,
+                orders!inner ( status, fulfillment_type, created_at, table_id, restaurant_tables(label) ),
+                payment_accounts ( label )
+            `)
+            .order("id", { ascending: false })
+            .limit(500);
+
+        if (fallbackError2) throw new Error(fallbackError2.message);
+        return { rows: await mapFallbackRows(sb, fallbackData2 ?? []), missingFn: false };
+    }
+
+    return { rows: await mapFallbackRows(sb, fallbackData ?? []), missingFn: false };
+}
+
+/** Map raw fallback rows (no RPC) into PaymentHistoryRow objects. */
+async function mapFallbackRows(
+    sb: ReturnType<typeof supabaseBrowser>,
+    rawRows: Row[],
+): Promise<PaymentHistoryRow[]> {
+    return Promise.all(
+        rawRows.map(async (r, idx) => {
             let proofUrl: string | null = null;
-            if (r.proof_path) {
+            const proofPath = r.proof_image_path;
+            if (proofPath) {
                 const { data: signed } = await sb.storage
                     .from("payment-proofs")
-                    .createSignedUrl(String(r.proof_path), 60 * 60);
+                    .createSignedUrl(String(proofPath), 60 * 60);
                 proofUrl = signed?.signedUrl ?? null;
             }
+            const order = (r.orders as Row) ?? {};
+            const tableRow = (order.restaurant_tables as Row) ?? null;
+            const accountRow = (r.payment_accounts as Row) ?? null;
+            const orderCreatedAt = String(order.created_at ?? r.verified_at ?? new Date().toISOString());
             return {
                 id: String(r.id),
                 orderId: String(r.order_id),
-                orderNumber: String(r.order_number ?? ""),
+                orderNumber: String(idx + 1),  // sequential within returned set
                 amount: Number(r.amount ?? 0),
                 status: String(r.status ?? ""),
                 method: String(r.method ?? ""),
                 transactionId: r.transaction_id ? String(r.transaction_id) : null,
                 rejectReason: r.reject_reason ? String(r.reject_reason) : null,
-                accountLabel: r.account_label ? String(r.account_label) : null,
-                tableLabel: r.table_label ? String(r.table_label) : null,
-                fulfillmentType: r.fulfillment_type ? String(r.fulfillment_type) : null,
-                orderStatus: r.order_status ? String(r.order_status) : null,
-                verifiedByName: r.verified_by_name ? String(r.verified_by_name) : null,
-                createdAt: String(r.created_at),
+                accountLabel: accountRow?.label ? String(accountRow.label) : null,
+                tableLabel: tableRow?.label ? String(tableRow.label) : null,
+                fulfillmentType: order.fulfillment_type ? String(order.fulfillment_type) : null,
+                orderStatus: order.status ? String(order.status) : null,
+                verifiedByName: null,
+                createdAt: r.created_at ? String(r.created_at) : orderCreatedAt,
                 verifiedAt: r.verified_at ? String(r.verified_at) : null,
                 proofUrl,
             } satisfies PaymentHistoryRow;
         }),
     );
-    return { rows: withProof, missingFn: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -740,7 +865,10 @@ export async function fetchRestaurantSlug(): Promise<string> {
     return data.slug as string;
 }
 
-export async function saveMenuItem(payload: Row, id?: string): Promise<void> {
+export async function saveMenuItem(
+    payload: MenuItem & { sort_order?: number },
+    id?: string,
+): Promise<void> {
     const sb = supabaseBrowser();
     const clean: Row = {
         category_id: payload.category_id,
@@ -787,16 +915,12 @@ export async function saveMenuItem(payload: Row, id?: string): Promise<void> {
 }
 
 export async function deleteMenuItem(id: string): Promise<void> {
-    const { data, error } = await supabaseBrowser()
-        .from("menu_items")
-        .delete()
-        .eq("id", id)
-        .select("id");
+    const { data, error } = await supabaseBrowser().rpc("admin_delete_menu_item", {
+        p_menu_item_id: id,
+    });
     if (error) throw new Error(error.message);
-    if (!data?.length) {
-        throw new Error(
-            "Delete did not reach the database (no matching row was removed). Check admin permissions (RLS).",
-        );
+    if (!data?.ok) {
+        throw new Error("The database did not confirm the menu item deletion.");
     }
 }
 

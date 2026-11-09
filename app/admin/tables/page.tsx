@@ -138,7 +138,7 @@ function AdminTablesContent() {
   };
 
   return (
-    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
+    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16 lg:pl-64">
       <AdminHeader
         title="Table QR Codes"
         subtitle="Diner Scan & Order Stations"
