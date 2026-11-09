@@ -13,10 +13,13 @@ import {
   ExternalLink,
   ShieldCheck,
   Crown,
-  ChevronDown
+  ChevronDown,
+  Languages,
+  Users
 } from "lucide-react";
 import { getRoleInfo } from "@/lib/permissions";
 import { signOutStaff } from "@/lib/supabase";
+import { STAFF_LANG_LABEL, useStaffLang } from "@/lib/i18n/staff";
 
 interface AdminHeaderProps {
   title: string;
@@ -29,6 +32,7 @@ export default function AdminHeader({
 }: AdminHeaderProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { lang, setLang, t } = useStaffLang();
   const [role, setRole] = useState<string | null>(null);
   const [showStationMenu, setShowStationMenu] = useState(false);
 
@@ -46,6 +50,8 @@ export default function AdminHeader({
     { label: "Menu Catalog", href: "/admin/menu", icon: BookOpen, superOnly: false },
     { label: "Payment Accounts", href: "/admin/payment-accounts", icon: CreditCard, superOnly: true },
     { label: "Table QR Codes", href: "/admin/tables", icon: QrCode, superOnly: false },
+    { label: "Payment History", href: "/admin/payment-history", icon: CreditCard, superOnly: false },
+    { label: "Staff Accounts", href: "/admin/staff", icon: Users, superOnly: true },
     { label: "Analytics", href: "/admin/analytics", icon: BarChart3, superOnly: false },
   ];
 
@@ -84,18 +90,18 @@ export default function AdminHeader({
                 {isSuperAdmin ? (
                   <>
                     <Crown className="w-3 h-3 text-amber-400" />
-                    <span>Super Admin</span>
+                    <span>{t("Super Admin")}</span>
                   </>
                 ) : (
                   <>
                     <ShieldCheck className="w-3 h-3 text-blue-400" />
-                    <span>Admin (Limited)</span>
+                    <span>{t("Admin (Limited)")}</span>
                   </>
                 )}
               </span>
             </div>
             <p className="text-[11px] text-stone-400 font-medium">
-              Skill Coffee • {subtitle}
+              Skill Coffee • {t(subtitle)}
             </p>
           </div>
         </div>
@@ -119,7 +125,7 @@ export default function AdminHeader({
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
-                  <span>{link.label}</span>
+                  <span>{t(link.label)}</span>
                 </Link>
               );
             })}
@@ -127,13 +133,22 @@ export default function AdminHeader({
 
         {/* Right: Quick jumps */}
         <div className="hidden sm:flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setLang(lang === "am" ? "en" : "am")}
+            title={lang === "am" ? "Switch to English" : "አማርኛ ለመቀየር"}
+            className="flex items-center gap-1.5 text-xs font-bold bg-[#2B1810] hover:bg-[#3D2415] text-amber-200 px-3 py-1.5 rounded-lg border border-[#3D2415] transition-colors cursor-pointer"
+          >
+            <Languages className="w-3.5 h-3.5" />
+            <span>{STAFF_LANG_LABEL[lang]}</span>
+          </button>
           {/* Station Selector for Super Admin or Admin */}
           <div className="relative">
             <button
               onClick={() => setShowStationMenu(!showStationMenu)}
               className="text-xs text-stone-300 hover:text-white bg-[#2B1810] hover:bg-[#3D2415] border border-[#3D2415] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
             >
-              <span>Staff Consoles</span>
+              <span>{t("Staff Consoles")}</span>
               <ChevronDown className="w-3 h-3 text-stone-400" />
             </button>
 
@@ -181,7 +196,7 @@ export default function AdminHeader({
             target="_blank"
             className="text-xs text-amber-300/80 hover:text-amber-200 border border-amber-900/40 bg-amber-950/30 px-3 py-1.5 rounded-lg flex items-center gap-1"
           >
-            <span>Diner View</span>
+            <span>{t("Diner View")}</span>
             <ExternalLink className="w-3 h-3" />
           </Link>
           <button
@@ -189,9 +204,29 @@ export default function AdminHeader({
             className="flex items-center gap-1 text-xs text-rose-300/80 hover:text-rose-200 bg-rose-950/30 hover:bg-rose-950/60 border border-rose-900/40 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Logout</span>
+            <span>{t("Logout")}</span>
           </button>
         </div>
+      </div>
+
+      {/* Mobile: language + logout reachable on phones */}
+      <div className="flex sm:hidden items-center gap-2 mt-2">
+        <button
+          type="button"
+          onClick={() => setLang(lang === "am" ? "en" : "am")}
+          className="flex items-center gap-1.5 text-xs font-bold bg-[#2B1810] text-amber-200 px-3 py-1.5 rounded-lg border border-[#3D2415] cursor-pointer"
+        >
+          <Languages className="w-3.5 h-3.5" />
+          <span>{STAFF_LANG_LABEL[lang]}</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center gap-1.5 text-xs text-rose-300/90 bg-rose-950/30 border border-rose-900/40 px-3 py-1.5 rounded-lg cursor-pointer"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          <span>{t("Logout")}</span>
+        </button>
       </div>
     </header>
   );

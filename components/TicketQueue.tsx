@@ -5,6 +5,7 @@ import { Clock, CheckCircle, ArrowRight, Utensils, AlertCircle } from 'lucide-re
 import { Ticket, TicketStatus } from '../lib/types';
 import { handleImgError } from '../lib/img';
 import { orderNumber } from '../lib/order-number';
+import { useT } from '../lib/i18n/staff';
 
 interface TicketQueueProps {
   tickets: Ticket[];
@@ -47,6 +48,7 @@ export default function TicketQueue({
   title,
   className = '',
 }: TicketQueueProps) {
+  const t = useT();
   // Always present tickets in strict order of arrival (oldest first), no matter
   // what order the fetch / realtime merge happened to return them in.
   const sortedTickets = [...tickets].sort(
@@ -60,10 +62,10 @@ export default function TicketQueue({
           <CheckCircle size={26} />
         </div>
         <p className="font-serif text-base font-bold text-stone-300">
-          All caught up!
+          {t('All caught up!')}
         </p>
         <p className="text-xs text-stone-500 mt-1">
-          No pending orders in the {stationName} queue.
+          {t('No pending orders in the')} {t(stationName)} {t('queue.')}
         </p>
       </div>
     );
@@ -100,7 +102,7 @@ export default function TicketQueue({
                 <span
                   className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${config.badgeClass}`}
                 >
-                  {config.label}
+                  {t(config.label)}
                 </span>
               </div>
 
@@ -152,7 +154,7 @@ export default function TicketQueue({
                 <Clock size={12} />
                 <span>
                   {ticket.elapsed_minutes !== undefined
-                    ? `${ticket.elapsed_minutes}m elapsed`
+                    ? `${ticket.elapsed_minutes}${t('m elapsed')}`
                     : new Date(ticket.created_at).toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit',
@@ -170,7 +172,7 @@ export default function TicketQueue({
                       : 'bg-[#2B1810] hover:bg-[#3D2415] text-white border border-stone-700'
                   }`}
                 >
-                  <span>{config.nextLabel}</span>
+                  <span>{t(config.nextLabel)}</span>
                   <ArrowRight size={13} />
                 </button>
               )}

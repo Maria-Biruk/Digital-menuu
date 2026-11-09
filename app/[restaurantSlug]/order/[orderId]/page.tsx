@@ -21,8 +21,8 @@ import ProofUpload from "@/components/ProofUpload";
 import OrderStatusTracker from "@/components/OrderStatusTracker";
 import CallWaiterButton from "@/components/CallWaiterButton";
 import TableSelector from "@/components/TableSelector";
-import { supabaseBrowser } from "@/lib/supabase";
-import { fetchPaymentAccounts, fetchTables, setOrderTable } from "@/lib/db";
+import { supabaseBrowser, ensureDinerSession } from "@/lib/supabase";
+import { fetchPaymentAccounts, fetchTables, setOrderTable, fetchOrderQueueInfo, type QueueInfo } from "@/lib/db";
 import { pushNotification, playChime } from "@/lib/notify";
 import { orderNumber } from "@/lib/order-number";
 import type { OrderStatus, PaymentAccount, Table } from "@/lib/types";
@@ -68,6 +68,25 @@ const STATUS_ALERTS: Record<string, { title: string; text: string }> = {
   served: { title: "Skill Coffee", text: "✅ Your order has been served. Enjoy!" },
 };
 
+// Turn a raw Supabase/Postgres failure from the proof-upload flow into a
+// message a guest can actually act on, instead of leaking internals like
+// "new row violates row-level security policy" or "order not found".
+function friendlyProofError(raw: string): string {
+  if (raw === "session_missing") {
+    return "We lost your session. Please refresh this page and try again.";
+  }
+  if (/row-level security|not found|forbidden|P0002/i.test(raw)) {
+    return "This order doesn't belong to your current session. Please open the tracking link you received right after ordering, or scan the QR code at your table again.";
+  }
+  if (/screenshot not uploaded/i.test(raw)) {
+    return "Your receipt didn't finish uploading. Please tap Submit again.";
+  }
+  if (/failed to fetch|networkerror/i.test(raw)) {
+    return "Connection problem. Please check your internet and try again.";
+  }
+  return "Something went wrong while submitting your receipt. Please try again.";
+}
+
 export default function OrderStatusPage() {
   const params = useParams();
   const router = useRouter();
@@ -84,6 +103,7 @@ export default function OrderStatusPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pickupCode, setPickupCode] = useState<string | null>(null);
+  const [queueInfo, setQueueInfo] = useState<QueueInfo | null>(null);
   const [ticketStatuses, setTicketStatuses] = useState<string[]>([]);
   const [ticketStations, setTicketStations] = useState<string[]>([]);
 
@@ -118,7 +138,12 @@ export default function OrderStatusPage() {
       setLoadError(error.message);
       return;
     }
-    if (data) setOrder(data as OrderRow);
+    // RLS returns a row only when the current session owns the order. If it
+    // comes back empty (e.g. the anonymous session changed), clear the stale
+    // order so the guest sees "couldn't find this order" instead of an upload
+    // form that can never succeed.
+    setOrder((data as OrderRow) ?? null);
+    if (!data) return;
 
     // Ordered dishes live in `order_items`; join menu_items for the name.
     const { data: itemRows } = await sb
@@ -142,6 +167,10 @@ export default function OrderStatusPage() {
     const rows = (ticketRows ?? []) as Array<Record<string, any>>;
     setTicketStatuses(rows.map((r) => String(r.status)));
     setTicketStations(rows.map((r) => String(r.station)));
+
+    // How many orders are ahead + live ETA (order_queue_info RPC).
+    const qi = await fetchOrderQueueInfo(orderId);
+    setQueueInfo(qi);
   }, [orderId]);
 
   // This diner order flow is intentionally light-only. The menu's global `dark`
@@ -254,6 +283,8 @@ export default function OrderStatusPage() {
         ? ticketDerived
         : baseStatus;
 
+  const isServed = effectiveStatus === "served";
+
   // Identify whether the order is food, drink, or both so the tracker uses the
   // right wording (a drink order should not say "Started Cooking").
   const hasKitchen = ticketStations.some((s) => /kitchen/i.test(s));
@@ -289,31 +320,44 @@ export default function OrderStatusPage() {
   }, [order, paymentApproved, effectiveStatus]);
 
   const handleSubmitProof = async () => {
-    if (!uploadedFile || !orderId || !userId || !selectedAccountId) return;
+    if (!uploadedFile || !orderId || !selectedAccountId) return;
     setIsSubmitting(true);
     setSubmitError(null);
     try {
       const sb = supabaseBrowser();
-      const proofPath = `${userId}/${orderId}/proof.png`;
+
+      // Always build the storage path from the LIVE session uid, never a value
+      // captured at page load. Supabase Storage's RLS requires the first path
+      // folder to equal auth.uid(); if the anonymous session rotated since mount
+      // a stale uid would fail the upload with a raw
+      // "new row violates row-level security policy" error.
+      await ensureDinerSession();
+      const { data: sess } = await sb.auth.getSession();
+      const liveUid = sess.session?.user?.id ?? null;
+      if (!liveUid) throw new Error("session_missing");
+      if (liveUid !== userId) setUserId(liveUid);
+
+      const proofPath = `${liveUid}/${orderId}/proof.png`;
       const { error: upErr } = await sb.storage
         .from("payment-proofs")
         .upload(proofPath, uploadedFile, {
           contentType: uploadedFile.type || "image/png",
           upsert: true,
         });
-      if (upErr) throw new Error(upErr.message);
+      if (upErr) throw upErr;
 
       const { error: rpcErr } = await sb.rpc("attach_payment_proof", {
         p_order: orderId,
         p_account: selectedAccountId,
         p_proof_path: proofPath,
       });
-      if (rpcErr) throw new Error(rpcErr.message);
+      if (rpcErr) throw rpcErr;
 
       setSubmittedProof(true);
       await loadOrder();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : String(err));
+      const raw = err instanceof Error ? err.message : String(err);
+      setSubmitError(friendlyProofError(raw));
     } finally {
       setIsSubmitting(false);
     }
@@ -335,7 +379,6 @@ export default function OrderStatusPage() {
   };
 
   const subtotal = num(order?.subtotal);
-  const vat = num(order?.vat);
   const serviceFee = num(order?.service_fee);
   const total = num(order?.total);
 
@@ -460,10 +503,6 @@ export default function OrderStatusPage() {
                       <span>{subtotal.toLocaleString()} ETB</span>
                     </div>
                     <div className="flex justify-between text-stone-500 text-xs">
-                      <span>VAT (15%)</span>
-                      <span>{vat.toLocaleString()} ETB</span>
-                    </div>
-                    <div className="flex justify-between text-stone-500 text-xs">
                       <span>Service Fee</span>
                       <span>{serviceFee.toLocaleString()} ETB</span>
                     </div>
@@ -584,32 +623,69 @@ export default function OrderStatusPage() {
             {/* STATE 2: CONFIRMED / ACTIVE */}
             {isActive && (
               <div className="space-y-6 animate-fadeIn">
-                {/* Big 4-Digit Pickup Code Box */}
-                <div className="bg-white border-2 border-dashed border-[#2B1810] rounded-3xl p-6 text-center shadow-md relative overflow-hidden">
-                  <div className="absolute -top-12 -right-12 w-28 h-28 bg-amber-100/60 rounded-full blur-xl pointer-events-none" />
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3 border border-emerald-200">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    {paymentApproved ? "Verified & Active" : "Receipt Submitted"}
-                  </div>
-
-                  <p className="text-xs font-semibold uppercase tracking-widest text-stone-500 mb-1">
-                    Your 4-Digit Pickup / Verification Code
-                  </p>
-
-                  <div className="my-3 py-3 px-6 inline-block bg-[#38210F] text-white rounded-2xl shadow-inner border border-[#2B1810]">
-                    <div className="font-mono text-4xl sm:text-5xl font-black tracking-[0.35em] text-amber-400 pl-2">
-                      {pickupCode ?? "••••"}
+                {/* Queue transparency: orders ahead + estimated wait (gone once served) */}
+                {!isServed && queueInfo && (
+                  <div className="bg-white rounded-2xl p-4 shadow-sm border border-stone-200/80">
+                    <div className="flex items-center justify-around gap-3 text-center">
+                      <div>
+                        <p className="text-2xl font-serif font-black text-[#2B1810]">
+                          {queueInfo.ahead}
+                        </p>
+                        <p className="text-[11px] text-stone-500 font-semibold">
+                          order{queueInfo.ahead === 1 ? "" : "s"} ahead of you
+                        </p>
+                      </div>
+                      <div className="w-px h-10 bg-stone-200" />
+                      <div>
+                        <p className="text-2xl font-serif font-black text-[#2B1810] flex items-center justify-center gap-1">
+                          <Clock className="w-5 h-5 text-amber-600" />
+                          {queueInfo.etaMinutes}
+                          <span className="text-sm font-bold text-stone-500">min</span>
+                        </p>
+                        <p className="text-[11px] text-stone-500 font-semibold">estimated wait</p>
+                      </div>
                     </div>
                   </div>
+                )}
 
-                  <p className="text-xs text-stone-500 max-w-sm mx-auto mt-2">
-                    Provide this 4-digit code to your waiter or show it at the pickup station
-                    when collecting your food.
-                  </p>
-                </div>
+                {/* Big 4-Digit Pickup Code Box — auto-removed once the food is served */}
+                {!isServed ? (
+                  <div className="bg-white border-2 border-dashed border-[#2B1810] rounded-3xl p-6 text-center shadow-md relative overflow-hidden">
+                    <div className="absolute -top-12 -right-12 w-28 h-28 bg-amber-100/60 rounded-full blur-xl pointer-events-none" />
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3 border border-emerald-200">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {paymentApproved ? "Verified & Active" : "Receipt Submitted"}
+                    </div>
+
+                    <p className="text-xs font-semibold uppercase tracking-widest text-stone-500 mb-1">
+                      Your 4-Digit Pickup / Verification Code
+                    </p>
+
+                    <div className="my-3 py-3 px-6 inline-block bg-[#38210F] text-white rounded-2xl shadow-inner border border-[#2B1810]">
+                      <div className="font-mono text-4xl sm:text-5xl font-black tracking-[0.35em] text-amber-400 pl-2">
+                        {pickupCode ?? "••••"}
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-stone-500 max-w-sm mx-auto mt-2">
+                      Provide this 4-digit code to your waiter or show it at the pickup station
+                      when collecting your food.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-50 border-2 border-emerald-200 rounded-3xl p-6 text-center shadow-sm">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
+                    <p className="font-serif font-bold text-lg text-emerald-900">
+                      Served — enjoy your meal!
+                    </p>
+                    <p className="text-xs text-emerald-700 mt-1">
+                      Your verification code is no longer needed and has been removed.
+                    </p>
+                  </div>
+                )}
 
                 {/* Need Assistance */}
-                {!isTakeaway && (
+                {!isTakeaway && !isServed && (
                   <div className="text-center pt-2">
                     <p className="text-xs text-stone-500">
                       Need extra water, napkins, or help? Use the bell button to call your waiter.

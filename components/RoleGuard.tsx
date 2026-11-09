@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Lock, ShieldAlert, ArrowLeft, LogOut, ShieldCheck, Home } from "lucide-react";
 import { StaffRole } from "@/lib/types";
 import { getRoleInfo, canAccessRoute } from "@/lib/permissions";
+import { useStaffLang } from "@/lib/i18n/staff";
 
 interface RoleGuardProps {
   children: React.ReactNode;
@@ -22,6 +23,7 @@ export default function RoleGuard({
 }: RoleGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const { t } = useStaffLang();
   const [mounted, setMounted] = useState(false);
   const [role, setRole] = useState<string | null>(null);
 
@@ -49,20 +51,20 @@ export default function RoleGuard({
           </div>
           <div className="space-y-2">
             <span className="text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full bg-amber-950 text-amber-300 border border-amber-800">
-              Authentication Required
+              {t("Authentication Required")}
             </span>
             <h2 className="font-serif font-bold text-2xl text-white">
-              Staff Portal Login
+              {t("Staff Portal Login")}
             </h2>
             <p className="text-xs text-stone-400 leading-relaxed">
-              You must sign in with a valid staff role to access {pageTitle}.
+              {t("You must sign in with a valid staff role to access")} {t(pageTitle)}.
             </p>
           </div>
           <Link
             href="/admin/login"
             className="w-full py-3.5 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-white font-bold text-xs uppercase tracking-wider transition-all block cursor-pointer border border-[#3D2415] shadow-lg"
           >
-            Go to Staff Login
+            {t("Go to Staff Login")}
           </Link>
         </div>
       </div>
@@ -81,17 +83,17 @@ export default function RoleGuard({
           </div>
           <div className="space-y-2">
             <span className="text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full bg-amber-950 text-amber-300 border border-amber-700">
-              Super Admin Protected
+              {t("Super Admin Protected")}
             </span>
             <h2 className="font-serif font-bold text-2xl text-white">
-              Super Admin Authorization Required
+              {t("Super Admin Authorization Required")}
             </h2>
             <p className="text-xs text-stone-300 leading-relaxed">
-              {pageTitle} contains sensitive restaurant financial or configuration settings and is strictly reserved for the <strong className="text-amber-400">Super Admin</strong>.
+              {t(pageTitle)} {t("contains sensitive restaurant financial or configuration settings and is strictly reserved for the")} <strong className="text-amber-400">{t("Super Admin")}</strong>.
             </p>
             <div className="mt-3 p-3 rounded-xl bg-[#38210F] border border-[#2B1810] text-left text-xs space-y-1">
               <p className="text-stone-400 font-medium">
-                Current Role: <span className="text-white font-bold">{roleInfo.label}</span>
+                {t("Current Role:")} <span className="text-white font-bold">{roleInfo.label}</span>
               </p>
               <p className="text-[11px] text-stone-500">
                 Regular Admins have operational access (Menu, Tables) but cannot modify core payment bank accounts or financial analytics.
@@ -103,7 +105,7 @@ export default function RoleGuard({
               onClick={() => router.push(roleInfo.homeRoute)}
               className="w-full py-3.5 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-amber-300 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border border-[#3D2415]"
             >
-              Return to Permitted Console ({roleInfo.label})
+              {t("Return to Permitted Console")} ({roleInfo.label})
             </button>
             <button
               onClick={() => {
@@ -112,7 +114,7 @@ export default function RoleGuard({
               }}
               className="w-full py-2.5 rounded-xl bg-transparent hover:bg-white/5 text-stone-400 hover:text-white font-semibold text-xs transition-colors cursor-pointer border border-stone-800"
             >
-              Log in as Super Admin
+              {t("Log in as Super Admin")}
             </button>
           </div>
         </div>
@@ -134,17 +136,17 @@ export default function RoleGuard({
           </div>
           <div className="space-y-2">
             <span className="text-[10px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full bg-rose-950 text-rose-300 border border-rose-800">
-              Access Restricted · Station Isolation
+              {t("Access Restricted · Station Isolation")}
             </span>
             <h2 className="font-serif font-bold text-2xl text-white">
-              Station Permission Denied
+              {t("Station Permission Denied")}
             </h2>
             <p className="text-xs text-stone-400 leading-relaxed">
-              You are signed in as <span className="text-white font-bold">{roleInfo.label}</span>. Staff members cannot access unauthorized roles or admin consoles.
+              {t("You are signed in as")} <span className="text-white font-bold">{roleInfo.label}</span>. {t("Staff members cannot access unauthorized roles or admin consoles.")}
             </p>
             <div className="p-3 rounded-xl bg-[#38210F] border border-[#2B1810] text-left text-xs">
               <p className="text-stone-400">
-                <strong className="text-stone-300">Station Policy:</strong> {roleInfo.description}
+                <strong className="text-stone-300">{t("Station Policy:")}</strong> {roleInfo.description}
               </p>
             </div>
           </div>
@@ -154,7 +156,7 @@ export default function RoleGuard({
               className="w-full py-3.5 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-amber-300 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border border-[#3D2415] shadow-lg flex items-center justify-center gap-2"
             >
               <Home className="w-4 h-4" />
-              Return to My Console ({roleInfo.label})
+              {t("Return to My Console")} ({roleInfo.label})
             </button>
             <button
               onClick={() => {
@@ -164,7 +166,7 @@ export default function RoleGuard({
               className="w-full py-2.5 rounded-xl bg-transparent hover:bg-white/5 text-stone-400 hover:text-white font-semibold text-xs transition-colors cursor-pointer border border-stone-800 flex items-center justify-center gap-1.5"
             >
               <LogOut className="w-3.5 h-3.5" />
-              Switch Account / Login
+              {t("Switch Account / Login")}
             </button>
           </div>
         </div>

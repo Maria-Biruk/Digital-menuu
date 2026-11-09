@@ -28,6 +28,7 @@ import RoleGuard from "@/components/RoleGuard";
 import NotificationToast from "@/components/NotificationToast";
 import { useNewArrivalNotifier } from "@/lib/notify";
 import { orderNumber } from "@/lib/order-number";
+import { useT } from "@/lib/i18n/staff";
 
 export default function WaiterFloorPage() {
   return (
@@ -37,18 +38,19 @@ export default function WaiterFloorPage() {
   );
 }
 
-function timeAgo(iso: string): string {
+function timeAgo(iso: string, t: (k: string) => string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
   const mins = Math.round((Date.now() - then) / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return t("Just now");
+  if (mins < 60) return `${mins}${t("m ago")}`;
   const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
+  if (hrs < 24) return `${hrs}${t("h ago")}`;
+  return `${Math.round(hrs / 24)}${t("d ago")}`;
 }
 
 function WaiterFloorContent() {
+  const t = useT();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [callAlerts, setCallAlerts] = useState<CallWaiterAlert[]>([]);
   const [browsingTables, setBrowsingTables] = useState<TableActivity[]>([]);
@@ -94,7 +96,7 @@ function WaiterFloorContent() {
       await markOrderServed(orderId, code);
       await loadTickets();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to mark order served");
+      alert(err instanceof Error ? err.message : t("Failed to mark order served"));
     }
   };
 
@@ -109,25 +111,25 @@ function WaiterFloorContent() {
 
   // Chime + toast for new waiter calls and newly ready tickets (composite id so
   // a status change to "ready" counts as a fresh arrival).
-  const readyTickets = tickets.filter((t) => t.status === "ready");
+  const readyTickets = tickets.filter((tk) => tk.status === "ready");
   const { toast: callToast, dismiss: dismissCall } = useNewArrivalNotifier(
     callAlerts,
     (c) => c.id,
-    (c) => ({ title: "Waiter Called", message: `🔔 ${c.table_label} needs assistance` }),
+    (c) => ({ title: t("Waiter Called"), message: `🔔 ${c.table_label} ${t("needs assistance")}` }),
   );
   const { toast: readyToast, dismiss: dismissReady } = useNewArrivalNotifier(
     readyTickets,
-    (t) => `${t.id}:ready`,
-    (t) => ({ title: "Order Ready", message: `✅ #${orderNumber(t.order_id)} · ${t.table_label} is ready to serve` }),
+    (tk) => `${tk.id}:ready`,
+    (tk) => ({ title: t("Order Ready"), message: `✅ #${orderNumber(tk.order_id)} · ${tk.table_label} ${t("is ready to serve")}` }),
   );
 
   return (
     <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
       <NotificationToast toast={callToast ?? readyToast} onDismiss={() => { dismissCall(); dismissReady(); }} />
       <StaffHeader
-        title="Floor Service Console"
-        subtitle="Dining Room & Delivery"
-        badge="Waiter Active"
+        title={t("Floor Service Console")}
+        subtitle={t("Dining Room & Delivery")}
+        badge={t("Waiter Active")}
         icon={<UserCheck className="w-5 h-5 text-amber-400" />}
       />
 
@@ -143,22 +145,22 @@ function WaiterFloorContent() {
                 </div>
                 <div>
                   <h2 className="font-serif font-bold text-base text-white">
-                    Call Waiter Alerts
+                    {t("Call Waiter Alerts")}
                   </h2>
                   <p className="text-[11px] text-stone-400">
-                    Live assistance requests from diner tables
+                    {t("Live assistance requests from diner tables")}
                   </p>
                 </div>
               </div>
               <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500 text-stone-950">
-                {callAlerts.length} Active
+                {callAlerts.length} {t("Active")}
               </span>
             </div>
 
             {callAlerts.length === 0 ? (
               <div className="p-8 text-center rounded-xl bg-[#38210F] border border-stone-800 text-stone-500 text-xs">
                 <CheckCheck className="w-6 h-6 mx-auto mb-2 text-emerald-500" />
-                No pending waiter calls. All tables attended!
+                {t("No pending waiter calls. All tables attended!")}
               </div>
             ) : (
               <div className="space-y-3">
@@ -176,7 +178,7 @@ function WaiterFloorContent() {
                           {alert.table_label}
                         </p>
                         <p className="text-xs text-amber-300/90 font-medium">
-                          {alert.notes || "Requested waiter assistance at table"}
+                          {alert.notes || t("Requested waiter assistance at table")}
                         </p>
                         <p className="text-[10px] text-stone-500 flex items-center gap-1 mt-0.5">
                           <Clock className="w-3 h-3" />
@@ -193,7 +195,7 @@ function WaiterFloorContent() {
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0"
                     >
                       <CheckCircle className="w-3.5 h-3.5" />
-                      Acknowledge
+                      {t("Acknowledge")}
                     </button>
                   </div>
                 ))}
@@ -210,22 +212,22 @@ function WaiterFloorContent() {
                 </div>
                 <div>
                   <h2 className="font-serif font-bold text-base text-white">
-                    Tables Browsing Menu
+                    {t("Tables Browsing Menu")}
                   </h2>
                   <p className="text-[11px] text-stone-400">
-                    Live device presence before placing order
+                    {t("Live device presence before placing order")}
                   </p>
                 </div>
               </div>
               <span className="text-xs font-mono font-bold text-cyan-400 px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800">
-                {browsingTables.length} Active Sessions
+                {browsingTables.length} {t("Active Sessions")}
               </span>
             </div>
 
             <div className="space-y-3">
               {browsingTables.length === 0 ? (
                 <div className="p-8 text-center rounded-2xl bg-[#38210F] border border-stone-800 text-stone-500 text-xs">
-                  No tables have opened the menu recently.
+                  {t("No tables have opened the menu recently.")}
                 </div>
               ) : (
                 browsingTables.map((session, idx) => (
@@ -239,13 +241,13 @@ function WaiterFloorContent() {
                       </div>
                       <div>
                         <p className="text-xs font-bold text-white">{session.tableLabel}</p>
-                        <p className="text-[11px] text-stone-400">Opened the menu</p>
+                        <p className="text-[11px] text-stone-400">{t("Opened the menu")}</p>
                       </div>
                     </div>
 
                     <div className="text-right">
                       <span className="text-[10px] text-stone-500 block">
-                        {timeAgo(session.viewedAt)}
+                        {timeAgo(session.viewedAt, t)}
                       </span>
                     </div>
                   </div>
@@ -259,10 +261,10 @@ function WaiterFloorContent() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-serif font-bold text-lg text-white">
-              Food & Beverage Dispatch Queue
+              {t("Food & Beverage Dispatch Queue")}
             </h2>
             <span className="text-xs text-stone-400">
-              Enter 4-digit code to complete delivery
+              {t("Enter 4-digit code to complete delivery")}
             </span>
           </div>
 
