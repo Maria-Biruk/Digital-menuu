@@ -1,15 +1,23 @@
 import { createBrowserClient } from "@supabase/ssr";
 
+function getSupabaseUrl() {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+}
+
+function getSupabaseAnonKey() {
+    return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+}
+
 let client: ReturnType<typeof createBrowserClient> | undefined;
 let dinerClient: ReturnType<typeof createBrowserClient> | undefined;
 
 export function supabaseBrowser() {
     if (!client) {
-        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        const url = getSupabaseUrl();
+        const key = getSupabaseAnonKey();
         if (!url || !key) {
             throw new Error(
-                "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY (.env.local), or the dev server wasn't restarted after adding them.",
+                "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set both in Vercel and redeploy.",
             );
         }
         client = createBrowserClient(url, key);
@@ -20,11 +28,11 @@ export function supabaseBrowser() {
 /** Keep diner anonymous auth separate from staff auth in the same browser. */
 export function supabaseDiner() {
     if (!dinerClient) {
-        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        const url = getSupabaseUrl();
+        const key = getSupabaseAnonKey();
         if (!url || !key) {
             throw new Error(
-                "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY (.env.local), or the dev server wasn't restarted after adding them.",
+                "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set both in Vercel and redeploy.",
             );
         }
         dinerClient = createBrowserClient(url, key, {

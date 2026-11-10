@@ -1,12 +1,12 @@
 "use client";
 
-import React from "react";
+import React, { Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Lang } from "../../../../lib/types";
 import { SLUG } from "../../../../lib/mock";
 import DigitalMenuView from "../../../../components/DigitalMenuView";
 
-export default function TableMenuPage() {
+function TableMenuPageContent() {
   const params = useParams();
   const searchParams = useSearchParams();
 
@@ -16,5 +16,13 @@ export default function TableMenuPage() {
 
   return (
     <DigitalMenuView tableId={tableId} slug={slug} initialLang={initialLang} />
+  );
+}
+
+export default function TableMenuPage() {
+  return (
+    <Suspense fallback={null}>
+      <TableMenuPageContent />
+    </Suspense>
   );
 }

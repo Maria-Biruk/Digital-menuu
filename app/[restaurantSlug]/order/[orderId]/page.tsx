@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -109,7 +109,7 @@ function friendlyProofError(raw: string): string {
   return "Something went wrong while submitting your receipt. Please try again.";
 }
 
-export default function OrderStatusPage() {
+function OrderStatusPageContent() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1029,5 +1029,13 @@ export default function OrderStatusPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function OrderStatusPage() {
+  return (
+    <Suspense fallback={null}>
+      <OrderStatusPageContent />
+    </Suspense>
   );
 }
