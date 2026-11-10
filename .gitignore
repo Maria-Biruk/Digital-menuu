@@ -2,3 +2,7 @@ node_modules/
 .next/
 .env
 .env.local
+/*.png
+tsconfig.tsbuildinfo
+backend/supabase/.temp/
+backend/probe-out.txt
