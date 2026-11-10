@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Bell, CheckCircle2 } from 'lucide-react';
-import { supabaseBrowser, ensureDinerSession } from '../lib/supabase';
+import { supabaseDiner, ensureDinerSession } from '../lib/supabase';
 
 interface CallWaiterButtonProps {
   tableId?: string;
@@ -24,7 +24,7 @@ export default function CallWaiterButton({
     setIsSending(true);
     try {
       await ensureDinerSession();
-      const { error } = await supabaseBrowser().rpc('call_waiter', { p_table: tableId });
+      const { error } = await supabaseDiner().rpc('call_waiter', { p_table: tableId });
       if (error) {
         console.error('call_waiter failed:', error.message);
         return;

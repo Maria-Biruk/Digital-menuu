@@ -5,8 +5,11 @@ import { createClient } from "@supabase/supabase-js";
 // ONE place allowed to mutate another staff member's auth password — and it
 // only proceeds after confirming the caller is themselves a Super Admin.
 function adminClient() {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+    const serviceKey =
+        process.env.SUPABASE_SERVICE_ROLE_KEY ??
+        process.env.SUPABASE_SERVICE_KEY ??
+        process.env.SERVICE_ROLE_KEY;
     if (!url || !serviceKey) return null;
     return createClient(url, serviceKey, {
         auth: { autoRefreshToken: false, persistSession: false },

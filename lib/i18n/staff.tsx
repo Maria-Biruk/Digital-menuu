@@ -17,7 +17,7 @@ import React, {
 // missing string can never render as a blank label.
 // ---------------------------------------------------------------------------
 
-export type StaffLang = "am" | "en";
+export type StaffLang = "am" | "en" | "om";
 
 const STORAGE_KEY = "staff_lang";
 
@@ -167,6 +167,7 @@ const am: Dict = {
   "h ago": " ሰዓት አፈር",
   "d ago": " ቀን አፈር",
   READY: "ዝግጁ",
+  "Select another status to view its orders.": "ትዕዛዞቹን ለማየት ሌላ ሁኔታ ይምረጡ።",
   "Note:": "ማስታወሻ፦",
   "Ready to Serve": "ለማድረስ ዝግጁ",
   "Cooking / Preparing": "በማበስል / በማዘጋጀት ላይ",
@@ -180,6 +181,7 @@ const am: Dict = {
   "Correct code — this order can be served.": "ኮዱ ትክክል ነው — ይህ ትዕዛዝ ሊደርስ ይችላል።",
   "Code verified. Order served.": "ኮዱ ተረጋግጧል። ትዕዛዙ ደርሷል።",
   "Checking code…": "ኮድ በማረጋገጥ ላይ…",
+  "Confirming delivery…": "ማድረሱን በማረጋገጥ ላይ…",
   "Confirm the hand-off — the code is verified against the kitchen record.":
     "እጅ ሽግግሩን ያረጋግጡ — ኮዱ ከመጠብቻ መዝገብ ጋር ይረጋገጣል።",
   "Ask the guest for the 4-digit code shown on their order screen to confirm handoff.":
@@ -206,8 +208,12 @@ const am: Dict = {
   Approve: "ፍቃድ ስጥ",
   Reject: "ውድቅ አድርግ",
   "Transaction ID": "የግብይት መለያ",
-  "Payment approved. Review the order and send it to the kitchen.":
-    "ክፍያው ጸድቋል። ትዕዛዙን ይመልከቱ እና ወደ መጠብቻ ላኩ።",
+  "Payment approved and order sent to the kitchen.":
+    "ክፍያው ጸድቋል፣ ትዕዛዙም ወደ ማብሰያ ቤት ተልኳል።",
+  "Walk-in order created and sent to the kitchen.":
+    "በአካል የተደረገው ትዕዛዝ ተፈጥሮ ወደ ማብሰያ ቤት ተልኳል።",
+  "Failed to send walk-in order to the kitchen.":
+    "በአካል የተደረገውን ትዕዛዝ ወደ ማብሰያ ቤት መላክ አልተቻለም።",
   "Payment rejected. Customer notified to upload valid proof.":
     "ክፍያው ውድቅ ሆኗል። ደንበኛው ትክክለኛ ማረጋገጫ እንዲቀመጥ ተገንዝቧል።",
   "Walk-In / Phone Order Terminal": "ቀጥታ ገቢ / ስልክ ትዕዛዝ ማዕከል",
@@ -250,8 +256,8 @@ const am: Dict = {
   "Enter Bank TX ID...": "የባንክ የግብይት መለያ ያስገቡ...",
   "Bank TX ID is required to approve.": "ፈቃድ ለመስጠት የባንክ የግብይት መለያ ያስፈልጋል።",
   "Enter the bank transaction ID first": "መጀመሪያ የባንክ የግብይት መለያውን ያስገቡ",
-  "Approve and issue pickup code": "ፍቃድ ይስጡ እና የመረጋገጫ ኮድ ይላኩ",
-  "Approve & Issue Code": "ፍቃድ ይስጡ እና ኮድ ይላኩ",
+  "Approve & Send to Kitchen": "ፍቃድ ይስጡ እና ወደ ማብሰያ ቤት ይላኩ",
+  "Approve and send the order to the kitchen": "ትዕዛዙን ፍቃድ ሰጥተው ወደ ማብሰያ ቤት ይላኩ",
   "Duplicate Warning:": "የድጋሚ ማሳወቂያ፦",
   "This transaction ID has already been used for another order! Please double-check the customer screenshot.": "ይህ የግብይት መለያ ለሌላ ትዕዛዝ ተጠቅሟል! እባክዎ የደንበኛውን ስክሪንሾት ደግመው ያረጋግጡ።",
   "Payment Transfer Screenshot": "የክፍያ ማስተላለፊያ ስክሪንሾት",
@@ -370,7 +376,7 @@ export function StaffLangProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === "en" || saved === "am") setLangState(saved);
+    if (saved === "en" || saved === "am" || saved === "om") setLangState(saved);
     setReady(true);
   }, []);
 
@@ -409,7 +415,7 @@ export function useT() {
 export function getStaffLang(): StaffLang {
   if (typeof window === "undefined") return "am";
   const saved = window.localStorage.getItem(STORAGE_KEY);
-  return saved === "en" ? "en" : "am";
+  return saved === "en" || saved === "om" ? saved : "am";
 }
 
 /**
@@ -425,6 +431,7 @@ export function loc(
 }
 
 export const STAFF_LANG_LABEL: Record<StaffLang, string> = {
-  am: "አማርኛ",
-  en: "English",
+  en: "EN",
+  am: "AM",
+  om: "OM",
 };

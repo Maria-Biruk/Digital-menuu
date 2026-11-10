@@ -27,7 +27,7 @@ function AdminPaymentHistoryContent() {
   const isSuperAdmin = roleInfo.role === "super_admin" || roleInfo.role === "owner";
 
   return (
-    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
+    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16 lg:pl-64">
       <AdminHeader
         title={isSuperAdmin ? t("Complete Payment History") : t("Week Payment History")}
         subtitle={t("Screenshots & transactions")}

@@ -157,6 +157,202 @@ function RevenueBars({ series, period }: { series: SeriesPoint[]; period: 'today
   );
 }
 
+/** Dependency-free SVG line chart with a category breakdown on hover. */
+function OrderVolumeLine({
+  series,
+  categories,
+  period,
+}: {
+  series: SeriesPoint[];
+  categories: CategorySeriesLine[];
+  period: 'today' | 'week' | 'month' | 'year';
+}) {
+  const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null);
+  const data = series ?? [];
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const W = 720;
+  const H = 240;
+  const padX = 16;
+  const padTop = 16;
+  const padBottom = 28;
+  const innerW = W - padX * 2;
+  const innerH = H - padTop - padBottom;
+  const hasData = data.some((d) => d.value > 0);
+  const labelStep = period === 'today' ? 2 : period === 'month' ? 5 : 1;
+  const points = data.map((point, index) => ({
+    x: data.length === 1 ? W / 2 : padX + (innerW * index) / (data.length - 1),
+    y: padTop + innerH - (point.value / max) * innerH,
+    ...point,
+  }));
+  const linePath = points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+    .join(' ');
+  const hoveredPoint =
+    hoveredIndex == null ? null : points[hoveredIndex] ?? null;
+  const hoveredCategories =
+    hoveredIndex == null
+      ? []
+      : categories.map((category, index) => ({
+          name: category.name,
+          value: category.points[hoveredIndex] ?? 0,
+          topItem: category.topItemsByBucket[hoveredIndex]?.[0],
+          color: PALETTE[index % PALETTE.length],
+        }));
+
+  return (
+    <div className="relative" onMouseLeave={() => setHoveredIndex(null)}>
+      {hoveredPoint && (
+        <div
+          className="pointer-events-none absolute top-0 z-10 w-[min(15rem,80%)] -translate-x-1/2 rounded-2xl border border-amber-500/50 bg-[#2B1810] p-3.5 shadow-2xl"
+          style={{
+            left: `${(hoveredPoint.x / W) * 100}%`,
+          }}
+        >
+          <p className="mb-2 text-xs font-extrabold text-amber-300">
+            {hoveredPoint.label} · {hoveredPoint.value} orders
+          </p>
+          <div className="space-y-1.5">
+            {hoveredCategories.length ? (
+              hoveredCategories.map((category) => (
+                <div
+                  key={category.name}
+                  className="flex items-start justify-between gap-3 text-xs"
+                >
+                  <span className="flex items-start gap-2 text-stone-300">
+                    <span
+                      className="mt-1 h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: category.color }}
+                    />
+                    <span>
+                      <span className="font-semibold">{category.name}</span>
+                      <span className="block pl-1 text-[11px] italic text-stone-500">
+                        {category.value
+                          ? `${category.topItem?.name ?? "Items"} · ${category.value} sold`
+                          : "No sales"}
+                      </span>
+                    </span>
+                  </span>
+                  <span className="font-mono font-semibold text-stone-400">
+                    {category.value}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-[11px] italic text-stone-500">No category sales</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-[240px] w-full touch-pan-y"
+        preserveAspectRatio="none"
+        onMouseMove={(event) => {
+          if (!data.length) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - bounds.left) / bounds.width;
+          setHoveredIndex(
+            Math.max(
+              0,
+              Math.min(data.length - 1, Math.round(ratio * (data.length - 1))),
+            ),
+          );
+        }}
+        onTouchStart={(event) => {
+          if (!data.length) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.touches[0].clientX - bounds.left) / bounds.width;
+          setHoveredIndex(
+            Math.max(
+              0,
+              Math.min(data.length - 1, Math.round(ratio * (data.length - 1))),
+            ),
+          );
+        }}
+        onTouchMove={(event) => {
+          if (!data.length) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.touches[0].clientX - bounds.left) / bounds.width;
+          setHoveredIndex(
+            Math.max(
+              0,
+              Math.min(data.length - 1, Math.round(ratio * (data.length - 1))),
+            ),
+          );
+        }}
+      >
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const y = padTop + innerH * t;
+          return (
+            <line
+              key={t}
+              x1={padX}
+              x2={W - padX}
+              y1={y}
+              y2={y}
+              stroke="#2B1810"
+              strokeWidth={1}
+              strokeDasharray="3 5"
+            />
+          );
+        })}
+        {hoveredPoint && (
+          <line
+            x1={hoveredPoint.x}
+            x2={hoveredPoint.x}
+            y1={padTop}
+            y2={padTop + innerH}
+            stroke="#f59e0b"
+            strokeOpacity={0.45}
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {points.length > 1 && (
+          <path
+            d={linePath}
+            fill="none"
+            stroke="#f59e0b"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {points.map((point, index) => (
+          <circle
+            key={index}
+            cx={point.x}
+            cy={point.y}
+            r={hoveredIndex === index ? 5 : 3.5}
+            fill="#3A241A"
+            stroke="#f59e0b"
+            strokeWidth={2}
+            vectorEffect="non-scaling-stroke"
+          >
+            <title>{`${point.label}: ${point.value} orders`}</title>
+          </circle>
+        ))}
+      </svg>
+
+      <div className="flex justify-between px-1 mt-1">
+        {data.map((point, index) => (
+          <span key={index} className="text-[9px] text-stone-500 font-mono" style={{ flex: '1 1 0', textAlign: 'center' }}>
+            {index % labelStep !== 0 ? '' : point.label}
+          </span>
+        ))}
+      </div>
+
+      {!hasData && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <span className="text-xs text-stone-500 italic">No orders recorded for this period yet.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AnalyticsSummary({
   grossRevenue = 0,
   completedOrders = 0,
@@ -239,22 +435,73 @@ export default function AnalyticsSummary({
         </div>
       </div>
 
-      {/* Revenue bar chart */}
+      {/* Revenue and order volume charts */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="p-6 rounded-3xl bg-[#3A241A] border border-stone-800 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-800">
+            <div className="flex items-center gap-2">
+              <BarChart3 size={18} className="text-amber-500" />
+              <h3 className="font-serif font-bold text-base text-white">Revenue{periodSuffix(period)}</h3>
+            </div>
+            <span className="text-[10px] uppercase font-bold text-stone-500">
+              Peak {Math.max(0, ...revenueSeries.map((d) => d.value)).toLocaleString()} ETB
+            </span>
+          </div>
+          <RevenueBars series={revenueSeries} period={period} />
+        </div>
+
+        <div className="p-6 rounded-3xl bg-[#3A241A] border border-stone-800 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-800">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={18} className="text-cyan-400" />
+              <h3 className="font-serif font-bold text-base text-white">Order Volume{periodSuffix(period)}</h3>
+            </div>
+            <span className="text-[10px] uppercase font-bold text-stone-500">
+              Peak {peakOrders} orders
+            </span>
+          </div>
+          <OrderVolumeLine
+            series={ordersSeries}
+            categories={categorySeries}
+            period={period}
+          />
+        </div>
+      </div>
+
+      {/* Category breakdown */}
       <div className="p-6 rounded-3xl bg-[#3A241A] border border-stone-800 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-stone-800">
           <div className="flex items-center gap-2">
-            <BarChart3 size={18} className="text-amber-500" />
-            <h3 className="font-serif font-bold text-base text-white">Revenue{periodSuffix(period)}</h3>
+            <Layers size={18} className="text-cyan-400" />
+            <h3 className="font-serif font-bold text-base text-white">Sales by Category</h3>
           </div>
-          <span className="text-[10px] uppercase font-bold text-stone-500">
-            Peak {Math.max(0, ...revenueSeries.map((d) => d.value)).toLocaleString()} ETB
-          </span>
+          <span className="text-[10px] uppercase font-bold text-stone-500">Distribution</span>
         </div>
-        <RevenueBars series={revenueSeries} period={period} />
+
+        <div className="space-y-3">
+          {categoryBreakdown.length === 0 ? (
+            <p className="text-xs text-stone-500 italic">No category data for this period.</p>
+          ) : (
+            categoryBreakdown.map((cat, i) => (
+              <div key={cat.name} className="space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-stone-300 font-medium flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full" style={{ background: PALETTE[i % PALETTE.length] }} />
+                    {cat.name}
+                  </span>
+                  <span className="text-stone-400 font-mono">{cat.count} sold ({cat.percentage}%)</span>
+                </div>
+                <div className="w-full h-2 rounded-full bg-stone-900 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${cat.percentage}%`, background: PALETTE[i % PALETTE.length] }} />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
-      {/* Top Best Sellers & Category Breakdown Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Top Best Sellers */}
+      <div className="grid grid-cols-1 gap-6">
         {/* Best Sellers */}
         <div className="p-6 rounded-3xl bg-[#3A241A] border border-stone-800 space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-stone-800">
@@ -297,37 +544,6 @@ export default function AnalyticsSummary({
           </div>
         </div>
 
-        {/* Category Breakdown */}
-        <div className="p-6 rounded-3xl bg-[#3A241A] border border-stone-800 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-stone-800">
-            <div className="flex items-center gap-2">
-              <Layers size={18} className="text-cyan-400" />
-              <h3 className="font-serif font-bold text-base text-white">Sales by Category</h3>
-            </div>
-            <span className="text-[10px] uppercase font-bold text-stone-500">Distribution</span>
-          </div>
-
-          <div className="space-y-3">
-            {categoryBreakdown.length === 0 ? (
-              <p className="text-xs text-stone-500 italic">No category data for this period.</p>
-            ) : (
-              categoryBreakdown.map((cat, i) => (
-                <div key={cat.name} className="space-y-1.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-stone-300 font-medium flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ background: PALETTE[i % PALETTE.length] }} />
-                      {cat.name}
-                    </span>
-                    <span className="text-stone-400 font-mono">{cat.count} sold ({cat.percentage}%)</span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-stone-900 overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${cat.percentage}%`, background: PALETTE[i % PALETTE.length] }} />
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Full item sales table (feeds the CSV export) */}

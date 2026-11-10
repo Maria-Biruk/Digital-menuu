@@ -36,6 +36,9 @@ function AdminMenuContent() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedStation, setSelectedStation] = useState<string>("all");
   const [editorItem, setEditorItem] = useState<MenuItem | null | "new">(null);
+  const [deleteTarget, setDeleteTarget] = useState<MenuItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   // Save failures go inside the editor form — the page toast renders behind
   // the full-screen overlay and is invisible while the editor is open.
@@ -74,21 +77,26 @@ function AdminMenuContent() {
     }
   };
 
-  const handleDeleteItem = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this menu item?")) return;
+  const handleDeleteItem = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
     try {
-      await deleteMenuItem(id);
-      await load();
+      await deleteMenuItem(deleteTarget.id);
+      setItems((prev) => prev.filter((item) => item.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      setDeleteError(null);
       showToast("Item deleted from menu catalog.");
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to delete item");
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete item");
+    } finally {
+      setDeleting(false);
     }
   };
 
   const handleSaveItem = async (savedItem: MenuItem) => {
     setSaveError(null);
     try {
-      await saveMenuItem(savedItem as unknown as Record<string, unknown>, editorItem === "new" ? undefined : savedItem.id);
+      await saveMenuItem(savedItem, editorItem === "new" ? undefined : savedItem.id);
       await load();
       showToast(editorItem === "new" ? `Added "${savedItem.name_i18n.en}" to menu.` : `Updated "${savedItem.name_i18n.en}".`);
       setEditorItem(null);
@@ -109,7 +117,7 @@ function AdminMenuContent() {
   });
 
   return (
-    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
+    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16 lg:pl-64">
       <AdminHeader
         title="Menu Management"
         subtitle="Catalog, Recipes & Station Routing"
@@ -167,7 +175,10 @@ function AdminMenuContent() {
 
             {/* Add Item Button */}
             <button
-              onClick={() => setEditorItem("new")}
+              onClick={() => {
+                setSaveError(null);
+                setEditorItem("new");
+              }}
               className="bg-[#2B1810] hover:bg-[#3D2415] active:bg-[#2A180B] text-white border border-[#3D2415] px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer hover:shadow-amber-950/40"
             >
               <Plus className="w-4 h-4 text-amber-400" />
@@ -288,14 +299,20 @@ function AdminMenuContent() {
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
-                              onClick={() => setEditorItem(item)}
+                              onClick={() => {
+                                setSaveError(null);
+                                setEditorItem(item);
+                              }}
                               className="p-2 rounded-lg bg-[#38210F] hover:bg-[#2B1810] text-stone-300 hover:text-white border border-[#2B1810] transition-colors cursor-pointer"
                               title="Edit item details"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleDeleteItem(item.id)}
+                              onClick={() => {
+                                setDeleteError(null);
+                                setDeleteTarget(item);
+                              }}
                               className="p-2 rounded-lg bg-[#38210F] hover:bg-rose-950/60 text-stone-400 hover:text-rose-300 border border-[#2B1810] hover:border-rose-900/50 transition-colors cursor-pointer"
                               title="Delete item"
                             >
@@ -312,6 +329,63 @@ function AdminMenuContent() {
           </div>
         </div>
       </div>
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close delete confirmation"
+            onClick={() => {
+              if (!deleting) setDeleteTarget(null);
+            }}
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+          />
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-menu-item-title"
+            aria-describedby="delete-menu-item-description"
+            className="relative z-10 w-full max-w-md rounded-2xl border border-rose-900/60 bg-[#2B1810] p-6 shadow-2xl"
+          >
+            <h2 id="delete-menu-item-title" className="text-lg font-bold text-white">
+              Delete menu item?
+            </h2>
+            <p id="delete-menu-item-description" className="mt-2 text-sm text-stone-300">
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-white">{deleteTarget.name_i18n.en}</span>
+              ? This permanently removes it from the database. Any linked test order
+              and all its items, payment records, pickup details, and kitchen tickets
+              will also be deleted.
+            </p>
+            {deleteError && (
+              <p role="alert" className="mt-4 rounded-xl border border-rose-700/60 bg-rose-950/60 p-3 text-sm text-rose-200">
+                {deleteError}
+              </p>
+            )}
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeleteError(null);
+                }}
+                className="rounded-xl border border-stone-700 px-4 py-2.5 text-sm font-semibold text-stone-200 hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                No, keep it
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void handleDeleteItem()}
+                className="rounded-xl bg-rose-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-600 disabled:cursor-wait disabled:opacity-60"
+              >
+                {deleting ? "Deleting…" : "Yes, delete"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Item Editor — Full-Page Overlay */}
       {editorItem !== null && (

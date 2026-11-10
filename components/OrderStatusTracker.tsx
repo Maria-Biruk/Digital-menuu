@@ -1,10 +1,19 @@
-'use client';
+"use client";
 
-import React from 'react';
-import { Check, Clock, Flame, Coffee, ChefHat, BellCheck, CheckCircle2, Wallet } from 'lucide-react';
-import { OrderStatus } from '../lib/types';
+import React from "react";
+import {
+  Check,
+  Clock,
+  Flame,
+  Coffee,
+  ChefHat,
+  BellCheck,
+  CheckCircle2,
+  Wallet,
+} from "lucide-react";
+import { OrderStatus } from "../lib/types";
 
-type OrderKind = 'food' | 'drink' | 'mixed';
+type OrderKind = "food" | "drink" | "mixed";
 
 interface OrderStatusTrackerProps {
   currentStatus?: OrderStatus;
@@ -28,50 +37,69 @@ interface StepDef {
 // The "preparing" and "ready" wording depends on whether the order is food,
 // drinks, or both — a drink order must not say "Started Cooking".
 function buildSteps(orderKind?: OrderKind): StepDef[] {
-  const preparing: Record<string, Pick<StepDef, 'label' | 'description' | 'icon'>> = {
-    food: { label: 'Started Cooking', description: 'Our chefs are preparing your food', icon: ChefHat },
-    drink: { label: 'Brewing & Mixing', description: 'Our baristas are crafting your drinks', icon: Coffee },
-    mixed: { label: 'Preparing Your Order', description: 'Chefs and baristas are preparing your items', icon: Flame },
-    default: { label: 'Preparing Your Order', description: 'Our team is preparing your items', icon: Flame },
+  const preparing: Record<
+    string,
+    Pick<StepDef, "label" | "description" | "icon">
+  > = {
+    food: {
+      label: "Started Cooking",
+      description: "Our chefs are preparing your food",
+      icon: ChefHat,
+    },
+    drink: {
+      label: "Brewing & Mixing",
+      description: "Our baristas are crafting your drinks",
+      icon: Coffee,
+    },
+    mixed: {
+      label: "Preparing Your Order",
+      description: "Chefs and baristas are preparing your items",
+      icon: Flame,
+    },
+    default: {
+      label: "Preparing Your Order",
+      description: "Our team is preparing your items",
+      icon: Flame,
+    },
   };
   const readyDesc: Record<string, string> = {
-    food: 'Plated and ready for pickup or table delivery',
-    drink: 'Poured and ready for pickup or table delivery',
-    mixed: 'Ready for pickup or table delivery',
-    default: 'Ready for pickup or table delivery',
+    food: "Plated and ready for pickup or table delivery",
+    drink: "Poured and ready for pickup or table delivery",
+    mixed: "Ready for pickup or table delivery",
+    default: "Ready for pickup or table delivery",
   };
-  const kind = orderKind ?? 'default';
+  const kind = orderKind ?? "default";
   const prep = preparing[kind] ?? preparing.default;
 
   return [
     {
-      key: 'received',
-      label: 'Order Received',
-      description: 'Your order reached the Skill Coffee counter',
+      key: "received",
+      label: "Order Received",
+      description: "Your order reached the Skill Coffee counter",
       icon: Clock,
     },
     {
-      key: 'payment',
-      label: 'Payment Confirmed / Sent to Kitchen',
-      description: 'Cashier verified your payment and dispatched the order',
+      key: "payment",
+      label: "Payment Confirmed",
+      description: "Cashier verified your payment",
       icon: Wallet,
     },
     {
-      key: 'preparing',
+      key: "preparing",
       label: prep.label,
       description: prep.description,
       icon: prep.icon,
     },
     {
-      key: 'ready',
-      label: 'Ready for Service',
+      key: "ready",
+      label: "Ready for Service",
       description: readyDesc[kind] ?? readyDesc.default,
       icon: BellCheck,
     },
     {
-      key: 'served',
-      label: 'Served & Enjoyed',
-      description: 'Delivered to your table',
+      key: "served",
+      label: "Served & Enjoyed",
+      description: "Delivered to your table",
       icon: CheckCircle2,
     },
   ];
@@ -92,37 +120,47 @@ export default function OrderStatusTracker({
   currentStep,
   paymentConfirmed = false,
   orderKind,
-  className = '',
+  className = "",
 }: OrderStatusTrackerProps) {
-  const activeStatus = currentStatus || currentStep || 'received';
+  const activeStatus = currentStatus || currentStep || "received";
   const statusRank = STATUS_RANK[activeStatus] ?? 0;
   // The payment step is complete once the cashier approved the receipt — or
   // once the order has already moved past it into the kitchen.
   const currentIndex =
-    activeStatus === 'cancelled'
+    activeStatus === "cancelled"
       ? -1
-      : Math.max(statusRank, paymentConfirmed ? 1 : 0);
+      : paymentConfirmed
+        ? Math.max(statusRank, 1)
+        : 0;
   const STEPS = buildSteps(orderKind);
 
   return (
     <div className={`space-y-4 ${className}`}>
-      <div className="relative pl-6 sm:pl-8 space-y-6 before:absolute before:left-3 sm:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-neutral-200 dark:before:bg-stone-800">
+      <div className="relative pl-7 sm:pl-10 space-y-6 before:absolute before:left-3 sm:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-neutral-200 dark:before:bg-stone-800">
         {STEPS.map((step, idx) => {
-          const isDone = idx <= currentIndex;
+          const isDone =
+            step.key === "payment" ? paymentConfirmed : idx <= currentIndex;
           // The pulsing "In Progress" badge sits on the NEXT unfinished step —
           // e.g. an order awaiting payment highlights the payment step.
-          const isCurrent = idx === currentIndex + 1 && activeStatus !== 'cancelled';
+          const isCurrent =
+            (step.key === "payment" &&
+              !paymentConfirmed &&
+              activeStatus !== "cancelled") ||
+            (idx === currentIndex + 1 && activeStatus !== "cancelled");
           const Icon = step.icon;
 
           return (
-            <div key={step.key} className="relative flex items-start gap-4">
+            <div
+              key={step.key}
+              className="relative flex items-start gap-5 pl-1"
+            >
               {/* Step indicator node */}
               <div
-                className={`absolute -left-6 sm:-left-8 top-0.5 w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center transition-all duration-300 z-10 ${
+                className={`absolute -left-5 sm:-left-6 top-0.5 w-6 h-6 sm:w-7 sm:h-7 rounded-full border-2 flex items-center justify-center transition-all duration-300 z-10 ${
                   isDone
-                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
-                    : 'bg-white dark:bg-[#3A241A] border-neutral-300 dark:border-stone-700 text-neutral-400'
-                } ${isCurrent ? 'ring-4 ring-emerald-500/20 scale-110' : ''}`}
+                    ? "bg-emerald-600 border-emerald-600 text-white shadow-sm"
+                    : "bg-white dark:bg-[#3A241A] border-neutral-300 dark:border-stone-700 text-neutral-400"
+                } ${isCurrent ? "ring-4 ring-emerald-500/20 scale-110" : ""}`}
               >
                 {isDone ? (
                   <Check size={14} className="stroke-[3]" />
@@ -132,13 +170,13 @@ export default function OrderStatusTracker({
               </div>
 
               {/* Step content */}
-              <div className="pt-0.5">
+              <div className="pt-0.5 ml-3 min-w-0">
                 <div className="flex items-center gap-2">
                   <h4
                     className={`font-serif text-xs sm:text-sm font-bold ${
                       isDone
-                        ? 'text-neutral-900 dark:text-white'
-                        : 'text-neutral-400 dark:text-stone-500'
+                        ? "text-neutral-900 dark:text-white"
+                        : "text-neutral-400 dark:text-stone-500"
                     }`}
                   >
                     {step.label}

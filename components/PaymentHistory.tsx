@@ -211,14 +211,6 @@ export default function PaymentHistory({
         </div>
       )}
 
-      {missingFn && (
-        <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-700/50 text-amber-200 text-xs leading-relaxed">
-          {t(
-            "Payment history needs one database update. Ask an administrator to run backend/supabase/2026-11-06-payment-history.sql in the Supabase SQL editor.",
-          )}
-        </div>
-      )}
-
       {/* Table */}
       {loading && !rows.length ? (
         <div className="p-10 text-center text-stone-400 text-sm">{t("Loading...")}</div>

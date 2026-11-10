@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -13,17 +13,32 @@ import {
   UtensilsCrossed,
   AlertCircle,
   Armchair,
+  Bell,
+  CheckCheck,
   Pencil,
-  X,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import PaymentAccountPicker from "@/components/PaymentAccountPicker";
 import ProofUpload from "@/components/ProofUpload";
 import OrderStatusTracker from "@/components/OrderStatusTracker";
 import CallWaiterButton from "@/components/CallWaiterButton";
 import TableSelector from "@/components/TableSelector";
-import { supabaseBrowser, ensureDinerSession } from "@/lib/supabase";
-import { fetchPaymentAccounts, fetchTables, setOrderTable, fetchOrderQueueInfo, type QueueInfo } from "@/lib/db";
-import { pushNotification, playChime } from "@/lib/notify";
+import { supabaseDiner, ensureDinerSession } from "@/lib/supabase";
+import {
+  fetchPaymentAccounts,
+  fetchTables,
+  setOrderTable,
+  fetchOrderQueueInfo,
+  type QueueInfo,
+} from "@/lib/db";
+import {
+  pushNotification,
+  playChime,
+  saveDinerNotification,
+  ensureNotifyPermission,
+  type DinerNotification,
+} from "@/lib/notify";
 import { orderNumber } from "@/lib/order-number";
 import type { OrderStatus, PaymentAccount, Table } from "@/lib/types";
 
@@ -49,7 +64,8 @@ interface OrderedItem {
   unit_price: number;
 }
 
-const num = (v: number | string | undefined): number => (v == null ? 0 : Number(v));
+const num = (v: number | string | undefined): number =>
+  v == null ? 0 : Number(v);
 
 // Progression rank so the diner's tracker can show the FURTHEST step reached,
 // whether it came from the parent order or an individual station ticket.
@@ -63,9 +79,15 @@ const ORDER_RANK: Record<OrderStatus, number> = {
 
 // Friendly diner-facing copy for each live status change (notification + toast).
 const STATUS_ALERTS: Record<string, { title: string; text: string }> = {
-  preparing: { title: "Skill Coffee", text: "🔥 Your order is now being prepared!" },
+  preparing: {
+    title: "Skill Coffee",
+    text: "🔥 Your order is now being prepared!",
+  },
   ready: { title: "Skill Coffee", text: "🔔 Your order is ready for service!" },
-  served: { title: "Skill Coffee", text: "✅ Your order has been served. Enjoy!" },
+  served: {
+    title: "Skill Coffee",
+    text: "✅ Your order has been served. Enjoy!",
+  },
 };
 
 // Turn a raw Supabase/Postgres failure from the proof-upload flow into a
@@ -87,7 +109,7 @@ function friendlyProofError(raw: string): string {
   return "Something went wrong while submitting your receipt. Please try again.";
 }
 
-export default function OrderStatusPage() {
+function OrderStatusPageContent() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -97,12 +119,14 @@ export default function OrderStatusPage() {
 
   const queryTable = searchParams?.get("table") || "1";
   const mockTable = queryTable.replace(/^t/, "");
+  const menuHref = `/${restaurantSlug}/order?table=${encodeURIComponent(queryTable)}`;
 
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [orderedItems, setOrderedItems] = useState<OrderedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pickupCode, setPickupCode] = useState<string | null>(null);
+  const [showPickupCode, setShowPickupCode] = useState(false);
   const [queueInfo, setQueueInfo] = useState<QueueInfo | null>(null);
   const [ticketStatuses, setTicketStatuses] = useState<string[]>([]);
   const [ticketStations, setTicketStations] = useState<string[]>([]);
@@ -122,12 +146,50 @@ export default function OrderStatusPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedProof, setSubmittedProof] = useState(false);
 
-  // Live status-change alerts (toast banner + browser notification).
-  const [statusToast, setStatusToast] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<DinerNotification[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const unreadNotifications = notifications.filter((notification) => !notification.read).length;
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("dm_order_notifications");
+      if (saved) {
+        const parsed = JSON.parse(saved) as DinerNotification[];
+        if (Array.isArray(parsed)) setNotifications(parsed.slice(0, 20));
+      }
+    } catch (error) {
+      console.error("Could not restore diner notifications", error);
+    }
+
+    const handleNotification = (event: Event) => {
+      const notification = (event as CustomEvent<DinerNotification>).detail;
+      if (!notification?.id) return;
+      setNotifications((previous) =>
+        previous.some((item) => item.id === notification.id)
+          ? previous
+          : [notification, ...previous].slice(0, 20),
+      );
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== "dm_order_notifications" || !event.newValue) return;
+      try {
+        const saved = JSON.parse(event.newValue) as DinerNotification[];
+        if (Array.isArray(saved)) setNotifications(saved.slice(0, 20));
+      } catch (error) {
+        console.error("Could not sync diner notifications across tabs", error);
+      }
+    };
+    window.addEventListener("diner-order-notification", handleNotification);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("diner-order-notification", handleNotification);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   const loadOrder = useCallback(async () => {
     if (!orderId) return;
-    const sb = supabaseBrowser();
+    const sb = supabaseDiner();
     // RLS only returns the diner's own order.
     const { data, error } = await sb
       .from("orders")
@@ -190,14 +252,11 @@ export default function OrderStatusPage() {
   useEffect(() => {
     let active = true;
     (async () => {
-      const sb = supabaseBrowser();
+      const sb = supabaseDiner();
       try {
+        await ensureDinerSession();
         const { data: sess } = await sb.auth.getSession();
-        let uid = sess.session?.user?.id ?? null;
-        if (!uid) {
-          const { data: anon } = await sb.auth.signInAnonymously();
-          uid = anon.user?.id ?? null;
-        }
+        const uid = sess.session?.user?.id ?? null;
         if (!active) return;
         setUserId(uid ?? null);
 
@@ -220,7 +279,8 @@ export default function OrderStatusPage() {
         const tbls = await fetchTables();
         if (active) setTables(tbls);
       } catch (err) {
-        if (active) setLoadError(err instanceof Error ? err.message : String(err));
+        if (active)
+          setLoadError(err instanceof Error ? err.message : String(err));
       } finally {
         if (active) setLoading(false);
       }
@@ -230,20 +290,46 @@ export default function OrderStatusPage() {
     };
   }, [orderId, loadOrder]);
 
+  useEffect(() => {
+    if (loading || loadError || order) return;
+
+    // The order was deleted or is no longer accessible; don't keep linking
+    // this device back to the same stale order from the menu.
+    try {
+      const orderKey = `dm_active_order_${restaurantSlug}_${queryTable}`;
+      if (localStorage.getItem(orderKey) === orderId) {
+        localStorage.removeItem(orderKey);
+        localStorage.removeItem(`${orderKey}_dismissed`);
+      }
+    } catch (error) {
+      console.error("Could not clear stale order link", error);
+    }
+  }, [loading, loadError, order, restaurantSlug, queryTable, orderId]);
+
   // Live status: subscribe to orders + order_station_tickets for this order.
   useEffect(() => {
     if (!orderId) return;
-    const sb = supabaseBrowser();
+    const sb = supabaseDiner();
     const channel = sb
       .channel(`order-${orderId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "orders", filter: `id=eq.${orderId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+          filter: `id=eq.${orderId}`,
+        },
         () => void loadOrder(),
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "order_station_tickets", filter: `order_id=eq.${orderId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "order_station_tickets",
+          filter: `order_id=eq.${orderId}`,
+        },
         () => void loadOrder(),
       )
       .subscribe();
@@ -252,18 +338,27 @@ export default function OrderStatusPage() {
     };
   }, [orderId, loadOrder]);
 
-  const isTakeaway = String(order?.fulfillment_type ?? "").toLowerCase().includes("take");
-  const currentTableLabel = tables.find((t) => t.id === order?.table_id)?.label ?? "";
+  const isTakeaway = String(order?.fulfillment_type ?? "")
+    .toLowerCase()
+    .includes("take");
+  const currentTableLabel =
+    tables.find((t) => t.id === order?.table_id)?.label ?? "";
 
-  // Order becomes "active" (code + tracker visible) once paid, once staff
-  // have started it (status leaves 'received'), or once proof is submitted.
+  const paymentSubmitted =
+    order?.payment_status === "pending_verification" ||
+    (submittedProof &&
+      order?.payment_status !== "failed" &&
+      order?.payment_status !== "refunded");
+
+  // Order becomes "active" once payment has been submitted, paid, or staff
+  // have started it. Persisted payment status survives back-navigation/reload.
   const isActive =
-    submittedProof ||
+    paymentSubmitted ||
     order?.payment_status === "paid" ||
     (order?.status != null && order.status !== "received");
 
-  // The tracker's "Payment Confirmed / Sent to Kitchen" step only lights up
-  // when the cashier actually approved the payment — not merely on proof upload.
+  // Only the cashier's persisted approval may confirm payment. Uploading proof
+  // merely submits it for review and must not advance the tracker.
   const paymentApproved = order?.payment_status === "paid";
 
   // Effective status for the tracker: the furthest step reached by either the
@@ -290,7 +385,13 @@ export default function OrderStatusPage() {
   const hasKitchen = ticketStations.some((s) => /kitchen/i.test(s));
   const hasBar = ticketStations.some((s) => /bar/i.test(s));
   const orderKind: "food" | "drink" | "mixed" | undefined =
-    hasKitchen && hasBar ? "mixed" : hasBar ? "drink" : hasKitchen ? "food" : undefined;
+    hasKitchen && hasBar
+      ? "mixed"
+      : hasBar
+        ? "drink"
+        : hasKitchen
+          ? "food"
+          : undefined;
 
   // Notify the diner the moment their order moves (preparing → ready → served,
   // or payment approval). Skips the very first snapshot after page load.
@@ -303,19 +404,28 @@ export default function OrderStatusPage() {
       return;
     }
     if (prevStageRef.current === stage) return;
+    const previousStage = prevStageRef.current;
     prevStageRef.current = stage;
 
     let text: string | null = null;
-    if (paymentApproved && stage.startsWith("paid")) {
-      text = "💳 Payment confirmed — order sent to the kitchen!";
-    } else {
+    if (paymentApproved && !previousStage.startsWith("paid:")) {
+      text = "💳 Payment confirmed by the cashier.";
+    } else if (previousStage.split(":")[1] !== effectiveStatus) {
       text = STATUS_ALERTS[effectiveStatus]?.text ?? null;
     }
     if (text) {
       playChime();
       pushNotification("Skill Coffee", text);
-      setStatusToast(text);
-      setTimeout(() => setStatusToast(null), 8000);
+      const notificationKey =
+        paymentApproved && !previousStage.startsWith("paid:")
+          ? "payment-confirmed"
+          : effectiveStatus;
+      saveDinerNotification({
+        id: `${orderId}:${notificationKey}`,
+        text,
+        read: false,
+        ts: Date.now(),
+      });
     }
   }, [order, paymentApproved, effectiveStatus]);
 
@@ -324,7 +434,7 @@ export default function OrderStatusPage() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const sb = supabaseBrowser();
+      const sb = supabaseDiner();
 
       // Always build the storage path from the LIVE session uid, never a value
       // captured at page load. Supabase Storage's RLS requires the first path
@@ -403,18 +513,90 @@ export default function OrderStatusPage() {
               />
             </div>
             <div className="text-left">
-              <h1 className="font-serif font-bold text-sm tracking-wide">Skill Coffee</h1>
+              <h1 className="font-serif font-bold text-sm tracking-wide">
+                Skill Coffee
+              </h1>
               <p className="text-[10px] text-amber-300 font-mono">
                 Order #{orderNumber(orderId)}
               </p>
             </div>
           </div>
-          <Link
-            href={`/${restaurantSlug}`}
-            className="text-xs bg-[#3D2415] text-amber-200 border border-[#FAF7F2]/20 px-2.5 py-1.5 rounded-lg hover:bg-[#FAF7F2]/10 transition-colors"
-          >
-            Menu
-          </Link>
+          <div className="relative flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const opening = !notificationsOpen;
+                setNotificationsOpen(opening);
+                if (opening) {
+                  void ensureNotifyPermission();
+                  const read = notifications.map((notification) => ({
+                    ...notification,
+                    read: true,
+                  }));
+                  setNotifications(read);
+                  try {
+                    localStorage.setItem("dm_order_notifications", JSON.stringify(read));
+                  } catch (error) {
+                    console.error("Could not save read notification state", error);
+                  }
+                }
+              }}
+              aria-label="Order notifications"
+              className="relative rounded-lg bg-[#3D2415] text-amber-200 border border-[#FAF7F2]/20 p-2 hover:bg-[#FAF7F2]/10"
+            >
+              <Bell className="h-4 w-4" />
+              {unreadNotifications > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
+                  {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                </span>
+              )}
+            </button>
+            <Link
+              href={menuHref}
+              className="text-xs bg-[#3D2415] text-amber-200 border border-[#FAF7F2]/20 px-2.5 py-1.5 rounded-lg hover:bg-[#FAF7F2]/10 transition-colors"
+            >
+              Menu
+            </Link>
+            {notificationsOpen && (
+              <div className="absolute right-0 top-full mt-2 w-72 rounded-2xl border border-[#3D2415] bg-[#2B1810] p-2 text-white shadow-2xl z-50">
+                <div className="flex items-center justify-between border-b border-[#3D2415] px-2 py-1.5 text-[11px] font-bold text-amber-200">
+                  <span>Order Updates</span>
+                  <span className="text-stone-400">{unreadNotifications} unread</span>
+                </div>
+                <div className="max-h-64 overflow-y-auto py-1">
+                  {notifications.length === 0 ? (
+                    <p className="px-2 py-4 text-center text-xs text-stone-400">
+                      No order updates yet.
+                    </p>
+                  ) : (
+                    notifications.map((notification) => (
+                      <div
+                        key={notification.id}
+                        className={`flex gap-2 rounded-xl px-2.5 py-2 ${
+                          notification.read ? "" : "bg-amber-900/20"
+                        }`}
+                      >
+                        {notification.read ? (
+                          <CheckCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                        ) : (
+                          <Bell className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+                        )}
+                        <div>
+                          <p className="text-[11px]">{notification.text}</p>
+                          <p className="mt-0.5 text-[10px] text-stone-400">
+                            {new Date(notification.ts).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -433,9 +615,17 @@ export default function OrderStatusPage() {
         )}
 
         {!loading && !loadError && !order && (
-          <div className="bg-white rounded-2xl p-8 text-center text-sm text-stone-500 border border-stone-200/80 shadow-sm">
-            We couldn&apos;t find this order. It may belong to another device or
-            hasn&apos;t been created yet.
+          <div className="bg-white rounded-2xl p-8 text-center text-sm text-stone-500 border border-stone-200/80 shadow-sm space-y-4">
+            <p>
+              This order is no longer available. It may have been cleared or
+              created on another device.
+            </p>
+            <Link
+              href={menuHref}
+              className="inline-flex items-center justify-center rounded-xl bg-[#2B1810] px-5 py-3 font-bold text-amber-200 hover:bg-[#3D2415] transition-colors"
+            >
+              Return to menu and place a new order
+            </Link>
           </div>
         )}
 
@@ -453,7 +643,9 @@ export default function OrderStatusPage() {
                     )}
                   </div>
                   <div>
-                    <p className="text-xs text-stone-500">Order ID: {order.id}</p>
+                    <p className="text-xs text-stone-500">
+                      Order ID: {order.id}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
@@ -467,6 +659,10 @@ export default function OrderStatusPage() {
                     {paymentApproved ? (
                       <>
                         <CheckCircle2 className="w-3.5 h-3.5" /> Confirmed
+                      </>
+                    ) : paymentSubmitted ? (
+                      <>
+                        <Clock className="w-3.5 h-3.5" /> Awaiting Verification
                       </>
                     ) : (
                       <>
@@ -486,9 +682,14 @@ export default function OrderStatusPage() {
                   {orderedItems.map((line, idx) => {
                     const name = line.name || "Item";
                     return (
-                      <div key={idx} className="flex justify-between items-center text-sm">
+                      <div
+                        key={idx}
+                        className="flex justify-between items-center text-sm"
+                      >
                         <span className="text-stone-700">
-                          <span className="font-semibold text-stone-900">{line.quantity}x</span>{" "}
+                          <span className="font-semibold text-stone-900">
+                            {line.quantity}x
+                          </span>{" "}
                           {name}
                         </span>
                         <span className="font-medium text-stone-900">
@@ -508,7 +709,9 @@ export default function OrderStatusPage() {
                     </div>
                     <div className="flex justify-between items-center pt-1 font-bold text-stone-900">
                       <span>Total Amount</span>
-                      <span className="text-base text-[#2B1810]">{total.toLocaleString()} ETB</span>
+                      <span className="text-base text-[#2B1810]">
+                        {total.toLocaleString()} ETB
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -534,7 +737,10 @@ export default function OrderStatusPage() {
               {effectiveStatus === "cancelled" ? (
                 <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-4 text-xs flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>This order was cancelled. Please place a new order from the menu.</span>
+                  <span>
+                    This order was cancelled. Please place a new order from the
+                    menu.
+                  </span>
                 </div>
               ) : (
                 <OrderStatusTracker
@@ -547,9 +753,13 @@ export default function OrderStatusPage() {
               <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs text-stone-500">
                 <div className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="font-semibold text-stone-700">Kitchen &amp; Bar Station</span>
+                  <span className="font-semibold text-stone-700">
+                    Kitchen &amp; Bar Station
+                  </span>
                 </div>
-                <span className="text-[11px] text-stone-400">Synced in real-time</span>
+                <span className="text-[11px] text-stone-400">
+                  Synced in real-time
+                </span>
               </div>
             </div>
 
@@ -562,10 +772,13 @@ export default function OrderStatusPage() {
                 <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
                   <AlertCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                   <div className="text-xs text-amber-900 leading-relaxed">
-                    <p className="font-bold mb-0.5">Payment Verification Required</p>
-                    Transfer the total of <strong>{total.toLocaleString()} ETB</strong> using
-                    Telebirr or Bank transfer, then upload a screenshot of your confirmation
-                    message below.
+                    <p className="font-bold mb-0.5">
+                      Payment Verification Required
+                    </p>
+                    Transfer the total of{" "}
+                    <strong>{total.toLocaleString()} ETB</strong> using Telebirr
+                    or Bank transfer, then upload a screenshot of your
+                    confirmation message below.
                   </div>
                 </div>
 
@@ -579,9 +792,12 @@ export default function OrderStatusPage() {
 
                 {/* Proof Upload */}
                 <div className="bg-[#FAF5EC] rounded-2xl p-5 shadow-sm border border-[#D4B896] space-y-3">
-                  <h3 className="text-sm font-bold text-stone-900">Upload Transaction Receipt</h3>
+                  <h3 className="text-sm font-bold text-stone-900">
+                    Upload Transaction Receipt
+                  </h3>
                   <p className="text-xs text-stone-500">
-                    Snap or upload a screenshot of your Telebirr / Bank SMS confirmation.
+                    Snap or upload a screenshot of your Telebirr / Bank SMS
+                    confirmation.
                   </p>
                   <ProofUpload onFileSelect={(file) => setUploadedFile(file)} />
                 </div>
@@ -640,9 +856,13 @@ export default function OrderStatusPage() {
                         <p className="text-2xl font-serif font-black text-[#2B1810] flex items-center justify-center gap-1">
                           <Clock className="w-5 h-5 text-amber-600" />
                           {queueInfo.etaMinutes}
-                          <span className="text-sm font-bold text-stone-500">min</span>
+                          <span className="text-sm font-bold text-stone-500">
+                            min
+                          </span>
                         </p>
-                        <p className="text-[11px] text-stone-500 font-semibold">estimated wait</p>
+                        <p className="text-[11px] text-stone-500 font-semibold">
+                          estimated wait
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -654,22 +874,47 @@ export default function OrderStatusPage() {
                     <div className="absolute -top-12 -right-12 w-28 h-28 bg-amber-100/60 rounded-full blur-xl pointer-events-none" />
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold mb-3 border border-emerald-200">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      {paymentApproved ? "Verified & Active" : "Receipt Submitted"}
+                      {paymentApproved
+                        ? "Verified & Active"
+                        : "Receipt Submitted"}
                     </div>
+                    {!paymentApproved && paymentSubmitted && (
+                      <p className="mb-2 text-xs font-semibold text-amber-800">
+                        Your payment receipt is awaiting cashier verification.
+                        You do not need to submit or pay again.
+                      </p>
+                    )}
 
                     <p className="text-xs font-semibold uppercase tracking-widest text-stone-500 mb-1">
                       Your 4-Digit Pickup / Verification Code
                     </p>
 
-                    <div className="my-3 py-3 px-6 inline-block bg-[#38210F] text-white rounded-2xl shadow-inner border border-[#2B1810]">
+                    <div className="my-3 py-3 px-6 inline-flex items-center justify-center bg-[#38210F] text-white rounded-2xl shadow-inner border border-[#2B1810] gap-2">
                       <div className="font-mono text-4xl sm:text-5xl font-black tracking-[0.35em] text-amber-400 pl-2">
-                        {pickupCode ?? "••••"}
+                        {showPickupCode ? (pickupCode ?? "••••") : "••••"}
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowPickupCode((v) => !v)}
+                        className="rounded-lg border border-amber-500/40 bg-[#2B1810] p-2 text-amber-200 hover:text-white transition-colors"
+                        aria-label={
+                          showPickupCode
+                            ? "Hide pickup code"
+                            : "Show pickup code"
+                        }
+                        title={showPickupCode ? "Hide code" : "Show code"}
+                      >
+                        {showPickupCode ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
                     </div>
 
                     <p className="text-xs text-stone-500 max-w-sm mx-auto mt-2">
-                      Provide this 4-digit code to your waiter or show it at the pickup station
-                      when collecting your food.
+                      Provide this 4-digit code to your waiter or show it at the
+                      pickup station when collecting your food.
                     </p>
                   </div>
                 ) : (
@@ -679,7 +924,8 @@ export default function OrderStatusPage() {
                       Served — enjoy your meal!
                     </p>
                     <p className="text-xs text-emerald-700 mt-1">
-                      Your verification code is no longer needed and has been removed.
+                      Your verification code is no longer needed and has been
+                      removed.
                     </p>
                   </div>
                 )}
@@ -688,7 +934,8 @@ export default function OrderStatusPage() {
                 {!isTakeaway && !isServed && (
                   <div className="text-center pt-2">
                     <p className="text-xs text-stone-500">
-                      Need extra water, napkins, or help? Use the bell button to call your waiter.
+                      Need extra water, napkins, or help? Use the bell button to
+                      call your waiter.
                     </p>
                   </div>
                 )}
@@ -696,100 +943,99 @@ export default function OrderStatusPage() {
             )}
 
             {/* TABLE SEATING: assign / change table AFTER payment, on the confirmed page */}
-            {isActive && order.status !== "served" && order.status !== "cancelled" && (
-              <div className="bg-white rounded-2xl p-5 shadow-sm border border-stone-200/80 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-[#FAF5EC] text-[#2B1810] flex items-center justify-center shrink-0 border border-[#D4B896]">
-                      <Armchair className="w-5 h-5" />
+            {isActive &&
+              order.status !== "served" &&
+              order.status !== "cancelled" && (
+                <div className="bg-white rounded-2xl p-5 shadow-sm border border-stone-200/80 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-[#FAF5EC] text-[#2B1810] flex items-center justify-center shrink-0 border border-[#D4B896]">
+                        <Armchair className="w-5 h-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-stone-900">
+                          {isTakeaway
+                            ? "Ordering to go?"
+                            : `Table ${currentTableLabel || "—"}`}
+                        </p>
+                        <p className="text-xs text-stone-500">
+                          {isTakeaway
+                            ? "Once you're seated in the cafe, add your table number."
+                            : "Eating here — tap change if you move to a different table."}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-stone-900">
-                        {isTakeaway ? "Ordering to go?" : `Table ${currentTableLabel || "—"}`}
-                      </p>
-                      <p className="text-xs text-stone-500">
-                        {isTakeaway
-                          ? "Once you're seated in the cafe, add your table number."
-                          : "Eating here — tap change if you move to a different table."}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingTable((v) => !v);
-                      setPickingTableId(order.table_id || "");
-                      setTableMsg(null);
-                    }}
-                    className="shrink-0 flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg bg-[#2B1810] text-white hover:bg-[#3D2415] transition-colors"
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                    {isTakeaway ? "Add Table" : "Change"}
-                  </button>
-                </div>
-
-                {editingTable && (
-                  <div className="pt-3 border-t border-stone-100 space-y-3 animate-fadeIn">
-                    <p className="text-xs font-semibold text-stone-600">
-                      Which table are you sitting at?
-                    </p>
-                    <TableSelector
-                      tables={tables}
-                      selectedTableId={pickingTableId}
-                      onSelect={(id) => setPickingTableId(id)}
-                    />
-                    {tableMsg && (
-                      <p className="text-xs text-rose-600 flex items-center gap-1.5">
-                        <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {tableMsg}
-                      </p>
-                    )}
                     <button
                       type="button"
-                      disabled={!pickingTableId || savingTable}
-                      onClick={handleSaveTable}
-                      className="w-full py-3 px-4 bg-[#2B1810] hover:bg-[#3D2415] text-white rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => {
+                        setEditingTable((v) => !v);
+                        setPickingTableId(order.table_id || "");
+                        setTableMsg(null);
+                      }}
+                      className="shrink-0 flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg bg-[#2B1810] text-white hover:bg-[#3D2415] transition-colors"
                     >
-                      {savingTable ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" /> Saving…
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-4 h-4 text-amber-400" /> Confirm My Table
-                        </>
-                      )}
+                      <Pencil className="w-3.5 h-3.5" />
+                      {isTakeaway ? "Add Table" : "Change"}
                     </button>
                   </div>
-                )}
-              </div>
-            )}
+
+                  {editingTable && (
+                    <div className="pt-3 border-t border-stone-100 space-y-3 animate-fadeIn">
+                      <p className="text-xs font-semibold text-stone-600">
+                        Which table are you sitting at?
+                      </p>
+                      <TableSelector
+                        tables={tables}
+                        selectedTableId={pickingTableId}
+                        onSelect={(id) => setPickingTableId(id)}
+                      />
+                      {tableMsg && (
+                        <p className="text-xs text-rose-600 flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />{" "}
+                          {tableMsg}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        disabled={!pickingTableId || savingTable}
+                        onClick={handleSaveTable}
+                        className="w-full py-3 px-4 bg-[#2B1810] hover:bg-[#3D2415] text-white rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {savingTable ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />{" "}
+                            Saving…
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-amber-400" />{" "}
+                            Confirm My Table
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
           </>
         )}
       </main>
 
-      {/* Live status-change toast (preparing → ready → served, payment approval) */}
-      {statusToast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] w-[calc(100vw-2rem)] max-w-sm animate-fadeIn">
-          <div className="p-4 rounded-2xl bg-[#2B1810] border border-amber-500/50 shadow-2xl flex items-start gap-3">
-            <p className="text-xs font-semibold text-amber-50 leading-relaxed flex-1">
-              {statusToast}
-            </p>
-            <button
-              type="button"
-              onClick={() => setStatusToast(null)}
-              aria-label="Dismiss notification"
-              className="p-1 rounded-lg text-stone-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Floating Call Waiter button — wired to rpc("call_waiter") */}
       {!isTakeaway && order?.table_id && (
-        <CallWaiterButton tableId={order.table_id} tableLabel={`Table ${mockTable}`} />
+        <CallWaiterButton
+          tableId={order.table_id}
+          tableLabel={`Table ${mockTable}`}
+        />
       )}
     </div>
+  );
+}
+
+export default function OrderStatusPage() {
+  return (
+    <Suspense fallback={null}>
+      <OrderStatusPageContent />
+    </Suspense>
   );
 }

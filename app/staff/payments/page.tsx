@@ -5,16 +5,45 @@ import StaffHeader from "@/components/StaffHeader";
 import PaymentVerificationQueue from "@/components/PaymentVerificationQueue";
 import WalkInOrderForm from "@/components/WalkInOrderForm";
 import PaymentHistory from "@/components/PaymentHistory";
-import ApprovedOrderModal from "@/components/ApprovedOrderModal";
 import NotificationToast from "@/components/NotificationToast";
 import { useNewArrivalNotifier } from "@/lib/notify";
 import { orderNumber } from "@/lib/order-number";
-import { fetchPendingPayments, subscribePayments, approvePayment, rejectPayment, fetchOrderTickets } from "@/lib/db";
-import { Payment, Ticket } from "@/lib/types";
+import { fetchPendingPayments, subscribePayments, subscribeNewOrders, approvePayment, rejectPayment, fetchOrderTickets, setTicketStatus } from "@/lib/db";
+import { Payment } from "@/lib/types";
 import { CreditCard, ShieldCheck, UserPlus, Receipt, CheckCircle, AlertCircle, History } from "lucide-react";
 import { useStaffLang } from "@/lib/i18n/staff";
+import { publishStaffNotification } from "@/lib/notify";
 
 import RoleGuard from "@/components/RoleGuard";
+
+async function dispatchOrderToKitchen(orderId: string): Promise<void> {
+  const tickets = await fetchOrderTickets(orderId);
+  if (!tickets.length) {
+    throw new Error("The payment was approved, but no kitchen tickets were found.");
+  }
+
+  const heldTickets = tickets.filter((ticket) => ticket.status === "held");
+  const alreadyReleased = tickets.some((ticket) =>
+    ["queued", "preparing", "ready"].includes(ticket.status),
+  );
+  if (!heldTickets.length && !alreadyReleased) {
+    throw new Error("The payment was approved, but the order could not be released to the kitchen.");
+  }
+
+  const failures: string[] = [];
+  for (const ticket of heldTickets) {
+    try {
+      await setTicketStatus(ticket.id, "queued");
+    } catch (err) {
+      failures.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  if (failures.length) {
+    throw new Error(
+      `The payment was approved, but ${failures.length} kitchen ticket(s) could not be sent. ${failures[0]}`,
+    );
+  }
+}
 
 export default function CashierPaymentsPage() {
   return (
@@ -36,10 +65,6 @@ function CashierPaymentsContent() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [existingTxIds, setExistingTxIds] = useState<string[]>([]);
   const [notification, setNotification] = useState<{ msg: string; type: "success" | "error" } | null>(null);
-  const [approved, setApproved] = useState<
-    | { orderId: string; amount: number; accountLabel: string; tickets: Ticket[] }
-    | null
-  >(null);
 
   const showNotification = (msg: string, type: "success" | "error" = "success") => {
     setNotification({ msg, type });
@@ -60,23 +85,35 @@ function CashierPaymentsContent() {
     return unsubscribe;
   }, [loadPayments]);
 
+  useEffect(() => {
+    const unsubscribe = subscribeNewOrders((orderId) => {
+      window.dispatchEvent(
+        new CustomEvent("staff-notify", {
+          detail: {
+            title: "New Diner Order",
+            message: `Order #${orderNumber(orderId)} was just placed.`,
+          },
+        }),
+      );
+    });
+    return unsubscribe;
+  }, []);
+
   const handleApprove = async (paymentId: string, txId: string) => {
-    const pay = payments.find((p) => p.id === paymentId);
     try {
       await approvePayment(paymentId, txId);
       if (txId) setExistingTxIds((prev) => [...prev, txId]);
       await loadPayments();
-      // Show the cashier exactly what the diner ordered, then let them dispatch it.
-      if (pay) {
-        const tickets = await fetchOrderTickets(pay.order_id);
-        setApproved({
-          orderId: pay.order_id,
-          amount: pay.amount,
-          accountLabel: pay.account_label,
-          tickets,
-        });
+      const payment = payments.find((item) => item.id === paymentId);
+      if (!payment) {
+        throw new Error("Payment approved, but its order could not be identified for kitchen dispatch.");
       }
-      showNotification(t("Payment approved. Review the order and send it to the kitchen."));
+      publishStaffNotification(
+        t("Payment Approved"),
+        `#${orderNumber(payment.order_id)} · ${t("Payment confirmed and sent to the kitchen.")}`,
+      );
+      await dispatchOrderToKitchen(payment.order_id);
+      showNotification(t("Payment approved and order sent to the kitchen."));
     } catch (err) {
       showNotification(err instanceof Error ? err.message : t("Failed to approve payment"), "error");
     }
@@ -98,19 +135,11 @@ function CashierPaymentsContent() {
     account_label?: string;
   }) => {
     void loadPayments();
-    showNotification(t("Walk-in Order created successfully!"));
-    // Reuse the dispatch modal so the cashier can send the held tickets to
-    // kitchen & bar with one tap, exactly like an approved diner order.
     try {
-      const tickets = await fetchOrderTickets(summary.orderId);
-      setApproved({
-        orderId: summary.orderId,
-        amount: summary.amount,
-        accountLabel: summary.account_label ?? t("Walk-in"),
-        tickets,
-      });
+      await dispatchOrderToKitchen(summary.orderId);
+      showNotification(t("Walk-in order created and sent to the kitchen."));
     } catch (err) {
-      console.error("Failed to load walk-in tickets", err);
+      showNotification(err instanceof Error ? err.message : t("Failed to send walk-in order to the kitchen."), "error");
     }
   };
 
@@ -129,8 +158,7 @@ function CashierPaymentsContent() {
       <NotificationToast toast={arrivalToast} onDismiss={dismissToast} />
       <StaffHeader
         title={t("Cashier & Billing Console")}
-        subtitle={t("Verification & Walk-in Terminal")}
-        badge={t("POS Active")}
+        subtitle=""
         icon={<CreditCard className="w-5 h-5 text-amber-400" />}
       />
 
@@ -251,16 +279,6 @@ function CashierPaymentsContent() {
         )}
       </div>
 
-      {approved && (
-        <ApprovedOrderModal
-          orderId={approved.orderId}
-          amount={approved.amount}
-          accountLabel={approved.accountLabel}
-          initialTickets={approved.tickets}
-          onClose={() => setApproved(null)}
-          onSent={() => void loadPayments()}
-        />
-      )}
     </div>
   );
 }

@@ -144,8 +144,7 @@ function BarConsoleContent() {
       <NotificationToast toast={arrivalToast} onDismiss={dismissToast} />
       <StaffHeader
         title={t("Bar Console")}
-        subtitle={t("Coffee, Cocktails & Beverages")}
-        badge={t("Bar Queue")}
+        subtitle=""
         icon={<Wine className="w-5 h-5 text-amber-400" />}
       />
 

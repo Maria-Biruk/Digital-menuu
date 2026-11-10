@@ -20,7 +20,7 @@ export default function WalkInOrderForm({
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<Record<string, number>>({});
   const [fulfillment, setFulfillment] = useState<FulfillmentType>('dine-in');
-  const [tableLabel, setTableLabel] = useState('1');
+  const [selectedTableId, setSelectedTableId] = useState('');
   const [phone, setPhone] = useState('');
   const [serviceMode, setServiceMode] = useState<ServiceMode>('together');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('cash');
@@ -53,7 +53,7 @@ export default function WalkInOrderForm({
         setTables(tbls);
         setAccounts(accs);
         if (accs[0]) setSelectedAccount(accs[0]);
-        if (tbls[0]) setTableLabel(tbls[0].label);
+        if (tbls[0]) setSelectedTableId(tbls[0].id);
       } catch (err) {
         console.error('Failed to load walk-in catalog data', err);
       }
@@ -105,7 +105,7 @@ export default function WalkInOrderForm({
     try {
       const table =
         fulfillment === 'dine-in'
-          ? tables.find((tb) => tb.label === tableLabel) ?? null
+          ? tables.find((tb) => tb.id === selectedTableId) ?? null
           : null;
       const res = await createWalkInOrder({
         items: cartEntries.map((ce) => ({ menu_item_id: ce.item.id, quantity: ce.qty })),
@@ -124,7 +124,7 @@ export default function WalkInOrderForm({
         notes: null,
       });
       const tableDesc =
-        fulfillment === 'dine-in' ? `${t('Table')} ${tableLabel}` : t('Takeaway');
+        fulfillment === 'dine-in' ? `${t('Table')} ${table?.label ?? ''}` : t('Takeaway');
       setSettled({
         orderId: res.orderId,
         code: res.pickupCode,
@@ -288,12 +288,12 @@ export default function WalkInOrderForm({
                 {t('Assign Table Number')}
               </label>
               <select
-                value={tableLabel}
-                onChange={(e) => setTableLabel(e.target.value)}
+                value={selectedTableId}
+                onChange={(e) => setSelectedTableId(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-stone-800 bg-[#38210F] text-white text-xs focus:outline-none focus:border-[#2B1810]"
               >
                 {tables.map((tb) => (
-                  <option key={tb.id} value={tb.label}>
+                  <option key={tb.id} value={tb.id}>
                     {t('Table')} {tb.label}
                   </option>
                 ))}

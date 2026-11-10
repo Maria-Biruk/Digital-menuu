@@ -10,7 +10,7 @@ import PickupCodeEntry from './PickupCodeEntry';
 
 interface WaiterFloorViewProps {
   tickets: Ticket[];
-  onMarkServed: (orderId: string, code: string) => void;
+  onMarkServed: (orderId: string, code: string) => Promise<void>;
   className?: string;
 }
 
@@ -40,10 +40,9 @@ export default function WaiterFloorView({
   const columnClass = (tab: 'ready' | 'preparing' | 'intake') =>
     `space-y-3 ${mobileTab === tab ? '' : 'hidden lg:block'}`;
 
-  const handleConfirmCode = (code: string) => {
+  const handleConfirmCode = async (code: string) => {
     if (activeCodeTicket) {
-      onMarkServed(activeCodeTicket.order_id, code);
-      setActiveCodeTicket(null);
+      await onMarkServed(activeCodeTicket.order_id, code);
     }
   };
 

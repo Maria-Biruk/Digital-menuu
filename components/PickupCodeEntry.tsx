@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect } from 'react';
-import { KeyRound, Check, X, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { KeyRound, Check, X, Loader2, ShieldCheck, ShieldAlert, PackageCheck } from 'lucide-react';
 import { verifyPickupCode } from '../lib/db';
 import { useT } from '../lib/i18n/staff';
 
@@ -10,12 +10,12 @@ interface PickupCodeEntryProps {
   expectedCode?: string;
   orderId?: string;
   tableLabel?: string;
-  onSubmit: (enteredCode: string) => void;
+  onSubmit: (enteredCode: string) => Promise<void>;
   onCancel: () => void;
   className?: string;
 }
 
-type VerifyState = 'idle' | 'checking' | 'correct' | 'incorrect' | 'unknown';
+type VerifyState = 'idle' | 'checking' | 'correct' | 'incorrect' | 'unknown' | 'submitting' | 'delivered' | 'error';
 
 export default function PickupCodeEntry({
   expectedCode,
@@ -28,6 +28,7 @@ export default function PickupCodeEntry({
   const t = useT();
   const [digits, setDigits] = useState(['', '', '', '']);
   const [status, setStatus] = useState<VerifyState>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
@@ -77,16 +78,25 @@ export default function PickupCodeEntry({
     }
   };
 
-  const canConfirm = status === 'correct' || status === 'unknown';
+  const canConfirm = status === 'correct' || status === 'unknown' || status === 'error';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isComplete || status === 'checking' || status === 'incorrect') return;
-    onSubmit(fullCode);
+    if (!isComplete || status === 'checking' || status === 'incorrect' || status === 'submitting' || status === 'delivered') return;
+    setErrorMessage(null);
+    setStatus('submitting');
+    try {
+      await onSubmit(fullCode);
+      setStatus('delivered');
+      setTimeout(onCancel, 900);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+      setStatus('error');
+    }
   };
 
   const borderFor = (filled: string) => {
-    if (status === 'incorrect') return 'border-rose-500 text-rose-400';
+    if (status === 'incorrect' || status === 'error') return 'border-rose-500 text-rose-400';
     if (status === 'correct') return 'border-emerald-500 text-emerald-300';
     if (filled) return 'border-amber-500/80 ring-2 ring-amber-500/20 text-white';
     return 'border-stone-800 focus:border-[#2B1810] text-white';
@@ -151,6 +161,12 @@ export default function PickupCodeEntry({
             <span>{t('Incorrect code. Please verify with guest or cashier.')}</span>
           </div>
         )}
+        {status === 'error' && errorMessage && (
+          <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-700/60 text-rose-200 text-xs font-semibold flex items-start gap-2">
+            <ShieldAlert size={16} className="shrink-0 mt-0.5 text-rose-400" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
         {status === 'correct' && (
           <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-700/60 text-emerald-200 text-xs font-semibold flex items-start gap-2">
             <ShieldCheck size={16} className="shrink-0 mt-0.5 text-emerald-400" />
@@ -162,26 +178,44 @@ export default function PickupCodeEntry({
             {t('Confirm the hand-off — the code is verified against the kitchen record.')}
           </p>
         )}
+        {status === 'delivered' && (
+          <div className="p-3 rounded-xl bg-emerald-900/80 border border-emerald-500/60 text-emerald-100 text-xs font-bold flex items-center justify-center gap-2 animate-pulse">
+            <PackageCheck size={18} className="text-emerald-300" />
+            <span>{t('Delivered! Order marked as served.')}</span>
+          </div>
+        )}
+        {status === 'submitting' && (
+          <p className="text-xs text-stone-400 font-semibold text-center flex items-center justify-center gap-1.5">
+            <Loader2 size={14} className="animate-spin" /> {t('Confirming delivery…')}
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-3 pt-2">
           <button
             type="button"
             onClick={onCancel}
-            className="py-3 px-4 rounded-xl border border-stone-800 text-xs font-bold text-stone-400 hover:text-white"
+            disabled={status === 'delivered' || status === 'submitting'}
+            className="py-3 px-4 rounded-xl border border-stone-800 text-xs font-bold text-stone-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {t('Cancel')}
           </button>
 
           <button
             type="submit"
-            disabled={!isComplete || !canConfirm}
+            disabled={!isComplete || (!canConfirm && status !== 'delivered') || status === 'delivered'}
             className={`py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md ${
-              canConfirm && isComplete
+              status === 'delivered'
+                ? 'bg-emerald-700 text-white cursor-default'
+                : canConfirm && isComplete
                 ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-95'
                 : 'bg-stone-800 text-stone-500 cursor-not-allowed'
             }`}
           >
-            <Check size={16} /> {t('Confirm Hand-off')}
+            {status === 'delivered' ? (
+              <><PackageCheck size={16} /> {t('Delivered ✓')}</>
+            ) : (
+              <><Check size={16} /> {t('Confirm Hand-off')}</>
+            )}
           </button>
         </div>
       </form>

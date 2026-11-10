@@ -80,7 +80,7 @@ function AdminStaffAccountsContent() {
   };
 
   return (
-    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16">
+    <div className="min-h-screen app-bg-dark text-stone-100 font-sans pb-16 lg:pl-64">
       <AdminHeader title={t("Staff Accounts")} subtitle={t("Manage & reset staff passwords")} />
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">

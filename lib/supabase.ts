@@ -1,19 +1,52 @@
 import { createBrowserClient } from "@supabase/ssr";
 
+function getSupabaseUrl() {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+}
+
+function getSupabaseAnonKey() {
+    return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+}
+
 let client: ReturnType<typeof createBrowserClient> | undefined;
+let dinerClient: ReturnType<typeof createBrowserClient> | undefined;
 
 export function supabaseBrowser() {
     if (!client) {
-        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        const url = getSupabaseUrl();
+        const key = getSupabaseAnonKey();
         if (!url || !key) {
             throw new Error(
-                "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY (.env.local), or the dev server wasn't restarted after adding them.",
+                "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set both in Vercel and redeploy.",
             );
         }
         client = createBrowserClient(url, key);
     }
     return client;
+}
+
+/** Keep diner anonymous auth separate from staff auth in the same browser. */
+export function supabaseDiner() {
+    if (!dinerClient) {
+        const url = getSupabaseUrl();
+        const key = getSupabaseAnonKey();
+        if (!url || !key) {
+            throw new Error(
+                "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set both in Vercel and redeploy.",
+            );
+        }
+        dinerClient = createBrowserClient(url, key, {
+            isSingleton: false,
+            auth: {
+                storage: window.localStorage,
+                storageKey: "skill-coffee-diner-auth",
+                autoRefreshToken: true,
+                persistSession: true,
+                detectSessionInUrl: false,
+            },
+        });
+    }
+    return dinerClient;
 }
 
 /**
@@ -23,9 +56,31 @@ export function supabaseBrowser() {
  * exists without any customer-facing login. Call this right before a diner write.
  */
 export async function ensureDinerSession(): Promise<void> {
-    const sb = supabaseBrowser();
-    const { data } = await sb.auth.getSession();
+    const sb = supabaseDiner();
+    const { data, error: sessionError } = await sb.auth.getSession();
+    if (sessionError) throw new Error(`Could not restore diner session: ${sessionError.message}`);
     if (data.session) return;
+
+    // Preserve orders created before diner and staff auth were separated.
+    const { data: legacyData, error: legacyError } =
+        await supabaseBrowser().auth.getSession();
+    if (legacyError) {
+        throw new Error(`Could not restore previous diner session: ${legacyError.message}`);
+    }
+    const legacySession = legacyData.session;
+    const legacyUser = legacySession?.user;
+    const wasAnonymous =
+        legacyUser?.is_anonymous === true ||
+        legacyUser?.app_metadata?.provider === "anonymous";
+    if (legacySession && wasAnonymous) {
+        const { error } = await sb.auth.setSession({
+            access_token: legacySession.access_token,
+            refresh_token: legacySession.refresh_token,
+        });
+        if (error) throw new Error(`Could not migrate diner session: ${error.message}`);
+        return;
+    }
+
     const { error } = await sb.auth.signInAnonymously();
     if (error) {
         throw new Error(

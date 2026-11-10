@@ -1,12 +1,12 @@
 'use client';
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Lang } from '../../../lib/types';
 import { SLUG } from '../../../lib/mock';
 import DigitalMenuView from '../../../components/DigitalMenuView';
 
-export default function OrderLandingPage() {
+function OrderLandingPageContent() {
   const params = useParams();
   const searchParams = useSearchParams();
 
@@ -22,6 +22,14 @@ export default function OrderLandingPage() {
       initialLang={initialLang}
       askTableOnArrival={!tableParam}
     />
+  );
+}
+
+export default function OrderLandingPage() {
+  return (
+    <Suspense fallback={null}>
+      <OrderLandingPageContent />
+    </Suspense>
   );
 }
 

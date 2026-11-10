@@ -51,6 +51,7 @@ export default function MenuItemEditor({
   const [imagePath, setImagePath] = useState(initialItem?.image_path || '');
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [imageBusy, setImageBusy] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
 
   // Pick a photo from files / gallery / camera, then downscale + compress it
@@ -112,8 +113,9 @@ export default function MenuItemEditor({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving || imageBusy) return;
 
     const updated: MenuItem = {
       // Keep fields the form does not expose (ingredients, calories, rating,
@@ -140,7 +142,12 @@ export default function MenuItemEditor({
     };
 
     // Parent (admin/menu page) persists this via saveMenuItem() into Supabase.
-    onSave(updated);
+    setIsSaving(true);
+    try {
+      await onSave(updated);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -497,9 +504,10 @@ export default function MenuItemEditor({
           </button>
           <button
             type="submit"
-            className="px-6 py-2.5 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-white text-xs font-bold shadow-lg transition-all cursor-pointer border border-[#3D2415]"
+            disabled={isSaving || imageBusy}
+            className="px-6 py-2.5 rounded-xl bg-[#2B1810] hover:bg-[#3D2415] text-white text-xs font-bold shadow-lg transition-all cursor-pointer border border-[#3D2415] disabled:cursor-wait disabled:opacity-60"
           >
-            {initialItem ? 'Save Changes' : 'Create Dish'}
+            {isSaving ? 'Saving…' : imageBusy ? 'Processing photo…' : initialItem ? 'Save Changes' : 'Add Menu'}
           </button>
         </div>
       </form>
