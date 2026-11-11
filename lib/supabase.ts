@@ -35,10 +35,13 @@ export function supabaseDiner() {
                 "Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY. Set both in Vercel and redeploy.",
             );
         }
+        // Guard: window.localStorage is not available during SSR on Vercel.
+        const storage =
+            typeof window !== "undefined" ? window.localStorage : undefined;
         dinerClient = createBrowserClient(url, key, {
             isSingleton: false,
             auth: {
-                storage: window.localStorage,
+                ...(storage ? { storage } : {}),
                 storageKey: "skill-coffee-diner-auth",
                 autoRefreshToken: true,
                 persistSession: true,

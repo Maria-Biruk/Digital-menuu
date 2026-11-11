@@ -12,6 +12,7 @@ let audioCtx: AudioContext | undefined;
 
 /** Short two-tone chime via the WebAudio API (no asset files needed). */
 export function playChime(): void {
+  if (typeof window === 'undefined') return;
   try {
     const Ctor =
       window.AudioContext ||
