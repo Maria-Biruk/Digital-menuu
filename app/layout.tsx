@@ -25,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="am" className={`${playfair.variable} ${inter.variable}`}>
-      <body className="font-sans antialiased bg-[#FAF7F2] dark:bg-[#150c07] text-[#1A1714] dark:text-[#f5ebd9] transition-colors duration-300" style={{ margin: 0 }}>
+    <html lang="am" className={`${playfair.variable} ${inter.variable}`} suppressHydrationWarning>
+      <body className="font-sans antialiased bg-[#FAF7F2] dark:bg-[#150c07] text-[#1A1714] dark:text-[#f5ebd9] transition-colors duration-300" style={{ margin: 0 }} suppressHydrationWarning>
         <StaffLangProvider>{children}</StaffLangProvider>
       </body>
     </html>
