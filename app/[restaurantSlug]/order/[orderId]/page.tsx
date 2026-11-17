@@ -18,6 +18,7 @@ import {
   Pencil,
   Eye,
   EyeOff,
+  ChevronDown,
 } from "lucide-react";
 import PaymentAccountPicker from "@/components/PaymentAccountPicker";
 import ProofUpload from "@/components/ProofUpload";
@@ -29,8 +30,7 @@ import {
   fetchPaymentAccounts,
   fetchTables,
   setOrderTable,
-  fetchOrderQueueInfo,
-  type QueueInfo,
+  syncOrderNumbers,
 } from "@/lib/db";
 import {
   pushNotification,
@@ -62,6 +62,21 @@ interface OrderedItem {
   name: string;
   quantity: number;
   unit_price: number;
+}
+
+interface TrackedOrder {
+  id: string;
+  status: OrderStatus;
+  payment_status: string;
+  table_id: string | null;
+  fulfillment_type: string;
+  itemSummary: string;
+  items: OrderedItem[];
+  subtotal: number;
+  serviceFee: number;
+  total: number;
+  orderKind: "food" | "drink" | "mixed" | undefined;
+  pickupCode: string | null;
 }
 
 const num = (v: number | string | undefined): number =>
@@ -123,15 +138,22 @@ function OrderStatusPageContent() {
 
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [orderedItems, setOrderedItems] = useState<OrderedItem[]>([]);
+  const [trackedOrders, setTrackedOrders] = useState<TrackedOrder[]>([]);
+  const [expandedTrackedOrders, setExpandedTrackedOrders] = useState<string[]>([]);
+  const [visibleTrackedPickupCodes, setVisibleTrackedPickupCodes] = useState<string[]>([]);
+  const [trackedOrdersLoading, setTrackedOrdersLoading] = useState(true);
+  const [trackedOrdersError, setTrackedOrdersError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pickupCode, setPickupCode] = useState<string | null>(null);
   const [showPickupCode, setShowPickupCode] = useState(false);
-  const [queueInfo, setQueueInfo] = useState<QueueInfo | null>(null);
+  const [orderDetailsExpanded, setOrderDetailsExpanded] = useState(false);
   const [ticketStatuses, setTicketStatuses] = useState<string[]>([]);
   const [ticketStations, setTicketStations] = useState<string[]>([]);
 
   const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [accountLoadError, setAccountLoadError] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("");
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -144,11 +166,221 @@ function OrderStatusPageContent() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [proofStatusError, setProofStatusError] = useState<string | null>(null);
   const [submittedProof, setSubmittedProof] = useState(false);
+  const [hasPersistedProof, setHasPersistedProof] = useState(false);
+  const [, setOrderNumberVersion] = useState(0);
+  const [orderNumberError, setOrderNumberError] = useState<string | null>(null);
 
   const [notifications, setNotifications] = useState<DinerNotification[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const unreadNotifications = notifications.filter((notification) => !notification.read).length;
+
+  const loadTrackedOrders = useCallback(async () => {
+    setTrackedOrdersLoading(true);
+    setTrackedOrdersError(null);
+    const sb = supabaseDiner();
+    let orderIds: string[] = [];
+    try {
+      const savedOrders = localStorage.getItem(
+        `dm_active_orders_${restaurantSlug}`,
+      );
+      const tableOrders = localStorage.getItem(
+        `dm_active_orders_${restaurantSlug}_${queryTable}`,
+      );
+      for (const saved of [savedOrders, tableOrders]) {
+        if (!saved) continue;
+        const parsed: unknown = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          orderIds.push(
+            ...parsed.filter((id): id is string => typeof id === "string"),
+          );
+        }
+      }
+      const lastOrder = localStorage.getItem(
+        `dm_active_order_${restaurantSlug}_${queryTable}`,
+      );
+      if (lastOrder) orderIds.push(lastOrder);
+      if (orderId) orderIds.push(orderId);
+    } catch (error) {
+      console.error("Could not read the customer's saved order list", error);
+    }
+
+    orderIds = [...new Set(orderIds)].slice(-50);
+    if (!orderIds.length) {
+      setTrackedOrders([]);
+      setTrackedOrdersLoading(false);
+      return;
+    }
+
+    const { data: orders, error: ordersError } = await sb
+      .from("orders")
+      .select("id, status, payment_status, table_id, fulfillment_type, subtotal, service_fee, total, created_at")
+      .in("id", orderIds)
+      .order("created_at", { ascending: false });
+    if (ordersError) {
+      console.error("Could not load the customer's order list", ordersError);
+      setTrackedOrdersError("Could not load your other orders. Refresh to try again.");
+      setTrackedOrdersLoading(false);
+      return;
+    }
+
+    const visibleOrders = (orders ?? []) as Array<Record<string, any>>;
+    const visibleIds = visibleOrders.map((row) => String(row.id));
+    if (!visibleIds.length) {
+      setTrackedOrders([]);
+      setTrackedOrdersError(null);
+      setTrackedOrdersLoading(false);
+      return;
+    }
+    const [
+      { data: items, error: itemsError },
+      { data: payments, error: paymentsError },
+      { data: tickets, error: ticketsError },
+      { data: secrets, error: secretsError },
+    ] =
+      await Promise.all([
+        sb
+          .from("order_items")
+          .select("order_id, quantity, unit_price, menu_items(name_i18n)")
+          .in("order_id", visibleIds),
+        sb
+          .from("payments")
+          .select("order_id, status")
+          .in("order_id", visibleIds)
+          .not("proof_image_path", "is", null)
+          .in("status", ["pending_verification", "paid"]),
+        sb
+          .from("order_station_tickets")
+          .select("order_id, status, station")
+          .in("order_id", visibleIds),
+        sb
+          .from("order_secrets")
+          .select("order_id, pickup_code")
+          .in("order_id", visibleIds),
+      ]);
+    if (itemsError || paymentsError || ticketsError) {
+      const error = itemsError ?? paymentsError ?? ticketsError;
+      console.error("Could not load tracked order details", error);
+      setTrackedOrdersError("Could not load order details. Refresh to try again.");
+      setTrackedOrdersLoading(false);
+      return;
+    }
+    if (secretsError) {
+      console.error("Could not load tracked order pickup codes", secretsError);
+    }
+
+    const itemsByOrder = new Map<string, OrderedItem[]>();
+    for (const item of (items ?? []) as Array<Record<string, any>>) {
+      const orderItemId = String(item.order_id);
+      const name = String(item.menu_items?.name_i18n?.en ?? "Item");
+      const lines = itemsByOrder.get(orderItemId) ?? [];
+      lines.push({
+        name,
+        quantity: Number(item.quantity ?? 0),
+        unit_price: Number(item.unit_price ?? 0),
+      });
+      itemsByOrder.set(orderItemId, lines);
+    }
+
+    const paymentStatuses = new Map(
+      ((payments ?? []) as Array<Record<string, any>>).map((payment) => [
+        String(payment.order_id),
+        String(payment.status),
+      ]),
+    );
+    const ticketsByOrder = new Map<string, Array<Record<string, any>>>();
+    for (const ticket of (tickets ?? []) as Array<Record<string, any>>) {
+      const ticketOrderId = String(ticket.order_id);
+      const orderTickets = ticketsByOrder.get(ticketOrderId) ?? [];
+      orderTickets.push(ticket);
+      ticketsByOrder.set(ticketOrderId, orderTickets);
+    }
+    const pickupCodes = new Map(
+      ((secrets ?? []) as Array<Record<string, any>>).map((secret) => [
+        String(secret.order_id),
+        String(secret.pickup_code ?? ""),
+      ]),
+    );
+    setTrackedOrders(
+      visibleOrders.map((row) => {
+        const trackedOrderId = String(row.id);
+        const orderTickets = ticketsByOrder.get(trackedOrderId) ?? [];
+        const ticketStatuses = orderTickets.map((ticket) => String(ticket.status));
+        const ticketStations = orderTickets.map((ticket) => String(ticket.station));
+        const ticketStatus: OrderStatus = !ticketStatuses.length
+          ? "received"
+          : ticketStatuses.every((status) => status === "ready")
+            ? "ready"
+            : ticketStatuses.some(
+                  (status) => status === "preparing" || status === "ready",
+                )
+              ? "preparing"
+              : "received";
+        const baseStatus = String(row.status ?? "received") as OrderStatus;
+        const status =
+          baseStatus === "served" || baseStatus === "cancelled"
+            ? baseStatus
+            : ORDER_RANK[ticketStatus] > ORDER_RANK[baseStatus]
+              ? ticketStatus
+              : baseStatus;
+        const hasKitchen = ticketStations.some((station) => /kitchen/i.test(station));
+        const hasBar = ticketStations.some((station) => /bar/i.test(station));
+        const orderKind =
+          hasKitchen && hasBar
+            ? "mixed"
+            : hasBar
+              ? "drink"
+              : hasKitchen
+                ? "food"
+                : undefined;
+        const orderItems = itemsByOrder.get(trackedOrderId) ?? [];
+        return {
+          id: trackedOrderId,
+          status,
+          payment_status:
+            paymentStatuses.get(trackedOrderId) ?? String(row.payment_status ?? ""),
+          table_id: row.table_id ? String(row.table_id) : null,
+          fulfillment_type: String(row.fulfillment_type ?? ""),
+          items: orderItems,
+          itemSummary: orderItems
+            .map((item) => `${item.quantity}× ${item.name}`)
+            .join(", "),
+          subtotal: num(row.subtotal),
+          serviceFee: num(row.service_fee),
+          total: num(row.total),
+          orderKind,
+          pickupCode: pickupCodes.get(trackedOrderId) || null,
+        };
+      }),
+    );
+    setTrackedOrdersError(null);
+    try {
+      localStorage.setItem(
+        `dm_active_orders_${restaurantSlug}`,
+        JSON.stringify(visibleIds),
+      );
+    } catch (error) {
+      console.error("Could not save the customer's recent order list", error);
+    }
+    try {
+      const numberedOrders = await syncOrderNumbers(visibleIds, sb);
+      if (numberedOrders === visibleIds.length) {
+        setOrderNumberVersion((version) => version + 1);
+        setOrderNumberError(null);
+      } else {
+        setOrderNumberError(
+          "Order numbers could not be loaded. Deploy backend/supabase/2026-11-13-order-numbers-and-staff-approval.sql in Supabase, then refresh.",
+        );
+      }
+    } catch (error) {
+      console.error("Could not resolve order sequence numbers", error);
+      setOrderNumberError(
+        "Order numbers are unavailable. Deploy backend/supabase/2026-11-13-order-numbers-and-staff-approval.sql in Supabase, then refresh.",
+      );
+    }
+    setTrackedOrdersLoading(false);
+  }, [orderId, queryTable, restaurantSlug]);
 
   useEffect(() => {
     try {
@@ -207,32 +439,71 @@ function OrderStatusPageContent() {
     setOrder((data as OrderRow) ?? null);
     if (!data) return;
 
-    // Ordered dishes live in `order_items`; join menu_items for the name.
-    const { data: itemRows } = await sb
-      .from("order_items")
-      .select("quantity, unit_price, menu_items(name_i18n)")
-      .eq("order_id", orderId);
+    try {
+      const numberedOrders = await syncOrderNumbers([orderId], sb);
+      if (numberedOrders === 1) {
+        setOrderNumberVersion((version) => version + 1);
+        setOrderNumberError(null);
+      } else {
+        setOrderNumberError(
+          "Order number could not be loaded. Deploy backend/supabase/2026-11-13-order-numbers-and-staff-approval.sql in Supabase, then refresh.",
+        );
+      }
+    } catch (error) {
+      console.error("Could not resolve order sequence number", error);
+      setOrderNumberError(
+        "Order number is unavailable. Deploy backend/supabase/2026-11-13-order-numbers-and-staff-approval.sql in Supabase, then refresh.",
+      );
+    }
+
+    // Load the order's related data concurrently so the tracker appears
+    // without waiting for the queue estimate or each related table in turn.
+    const [itemsResult, ticketsResult, paymentResult] = await Promise.all([
+      sb
+        .from("order_items")
+        .select("quantity, unit_price, menu_items(name_i18n)")
+        .eq("order_id", orderId),
+      sb
+        .from("order_station_tickets")
+        .select("status, station")
+        .eq("order_id", orderId),
+      sb
+        .from("payments")
+        .select("id")
+        .eq("order_id", orderId)
+        .not("proof_image_path", "is", null)
+        .in("status", ["pending_verification", "paid"])
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    const detailsError = itemsResult.error ?? ticketsResult.error;
+    if (detailsError) {
+      const error = detailsError;
+      setLoadError(error.message);
+      console.error("Could not load order details", error);
+      return;
+    }
+    if (paymentResult.error) {
+      console.error("Could not check submitted payment proof", paymentResult.error);
+      setProofStatusError("Could not check your receipt status. Refresh this page before submitting again.");
+    } else {
+      setHasPersistedProof(!!paymentResult.data);
+      setProofStatusError(null);
+    }
+
     setOrderedItems(
-      ((itemRows ?? []) as Array<Record<string, any>>).map((r) => ({
+      ((itemsResult.data ?? []) as Array<Record<string, any>>).map((r) => ({
         name: String(r.menu_items?.name_i18n?.en ?? "Item"),
         quantity: Number(r.quantity ?? 0),
         unit_price: Number(r.unit_price ?? 0),
       })),
     );
 
-    // Station tickets drive the live kitchen status: the parent order.status
-    // can lag behind (e.g. it may not flip to 'preparing' when one ticket starts).
-    const { data: ticketRows } = await sb
-      .from("order_station_tickets")
-      .select("status, station")
-      .eq("order_id", orderId);
-    const rows = (ticketRows ?? []) as Array<Record<string, any>>;
+    const rows = (ticketsResult.data ?? []) as Array<Record<string, any>>;
     setTicketStatuses(rows.map((r) => String(r.status)));
     setTicketStations(rows.map((r) => String(r.station)));
 
-    // How many orders are ahead + live ETA (order_queue_info RPC).
-    const qi = await fetchOrderQueueInfo(orderId);
-    setQueueInfo(qi);
   }, [orderId]);
 
   // This diner order flow is intentionally light-only. The menu's global `dark`
@@ -260,24 +531,45 @@ function OrderStatusPageContent() {
         if (!active) return;
         setUserId(uid ?? null);
 
-        await loadOrder();
+        setLoading(true);
+        const trackedOrdersLoad = loadTrackedOrders();
+        const orderLoad = loadOrder();
+        const secretLoad = sb
+            .from("order_secrets")
+            .select("pickup_code")
+            .eq("order_id", orderId)
+            .maybeSingle();
 
-        // Pickup code lives in order_secrets (diner-only via RLS).
-        const { data: secret } = await sb
-          .from("order_secrets")
-          .select("pickup_code")
-          .eq("order_id", orderId)
-          .maybeSingle();
-        if (active && secret?.pickup_code) setPickupCode(secret.pickup_code);
+        void fetchPaymentAccounts()
+          .then((accs) => {
+            if (!active) return;
+            setAccounts(accs);
+            setSelectedAccountId((prev) => prev || accs[0]?.id || "");
+            setAccountLoadError(false);
+          })
+          .catch((err) => {
+            console.error("Failed to load payment accounts", err);
+            if (active) setAccountLoadError(true);
+          })
+          .finally(() => {
+            if (active) setAccountsLoading(false);
+          });
 
-        const accs = await fetchPaymentAccounts();
-        if (active) {
-          setAccounts(accs);
-          setSelectedAccountId((prev) => prev || accs[0]?.id || "");
+        void fetchTables()
+          .then((tbls) => {
+            if (active) setTables(tbls);
+          })
+          .catch((err) => {
+            console.error("Failed to load restaurant tables", err);
+          });
+
+        const [_, secretResult] = await Promise.all([orderLoad, secretLoad, trackedOrdersLoad]);
+        if (secretResult.error) {
+          console.error("Failed to load order pickup code", secretResult.error);
         }
-
-        const tbls = await fetchTables();
-        if (active) setTables(tbls);
+        if (active && secretResult.data?.pickup_code) {
+          setPickupCode(secretResult.data.pickup_code);
+        }
       } catch (err) {
         if (active)
           setLoadError(err instanceof Error ? err.message : String(err));
@@ -288,7 +580,7 @@ function OrderStatusPageContent() {
     return () => {
       active = false;
     };
-  }, [orderId, loadOrder]);
+  }, [orderId, loadOrder, loadTrackedOrders]);
 
   useEffect(() => {
     if (loading || loadError || order) return;
@@ -345,21 +637,18 @@ function OrderStatusPageContent() {
     tables.find((t) => t.id === order?.table_id)?.label ?? "";
 
   const paymentSubmitted =
-    order?.payment_status === "pending_verification" ||
+    hasPersistedProof ||
     (submittedProof &&
       order?.payment_status !== "failed" &&
       order?.payment_status !== "refunded");
 
-  // Order becomes "active" once payment has been submitted, paid, or staff
-  // have started it. Persisted payment status survives back-navigation/reload.
-  const isActive =
-    paymentSubmitted ||
-    order?.payment_status === "paid" ||
-    (order?.status != null && order.status !== "received");
-
   // Only the cashier's persisted approval may confirm payment. Uploading proof
   // merely submits it for review and must not advance the tracker.
   const paymentApproved = order?.payment_status === "paid";
+
+  // Keep the receipt/payment step visible until a receipt is submitted or the
+  // cashier approves payment. Kitchen status changes must not skip this step.
+  const isActive = paymentSubmitted || paymentApproved;
 
   // Effective status for the tracker: the furthest step reached by either the
   // order row or any of its station tickets (kitchen/bar "Start Preparing").
@@ -414,18 +703,20 @@ function OrderStatusPageContent() {
       text = STATUS_ALERTS[effectiveStatus]?.text ?? null;
     }
     if (text) {
-      playChime();
-      pushNotification("Skill Coffee", text);
       const notificationKey =
         paymentApproved && !previousStage.startsWith("paid:")
           ? "payment-confirmed"
           : effectiveStatus;
-      saveDinerNotification({
+      const isNewNotification = saveDinerNotification({
         id: `${orderId}:${notificationKey}`,
-        text,
+        text: `Order ${displayCurrentOrderNumber} · ${text}`,
         read: false,
         ts: Date.now(),
       });
+      if (isNewNotification) {
+        playChime();
+        pushNotification("Skill Coffee", `Order ${displayCurrentOrderNumber} · ${text}`);
+      }
     }
   }, [order, paymentApproved, effectiveStatus]);
 
@@ -464,6 +755,7 @@ function OrderStatusPageContent() {
       if (rpcErr) throw rpcErr;
 
       setSubmittedProof(true);
+      setOrderDetailsExpanded(false);
       await loadOrder();
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
@@ -491,6 +783,16 @@ function OrderStatusPageContent() {
   const subtotal = num(order?.subtotal);
   const serviceFee = num(order?.service_fee);
   const total = num(order?.total);
+  const orderedQuantity = orderedItems.reduce(
+    (count, item) => count + item.quantity,
+    0,
+  );
+  const currentOrderNumber = orderNumber(orderId);
+  const displayCurrentOrderNumber =
+    currentOrderNumber === "…" ? "number unavailable" : `#${currentOrderNumber}`;
+  const otherTrackedOrders = trackedOrders.filter(
+    (trackedOrder) => trackedOrder.id !== orderId,
+  );
 
   return (
     <div className="min-h-screen app-bg-light text-stone-900 pb-20 font-sans">
@@ -517,7 +819,7 @@ function OrderStatusPageContent() {
                 Skill Coffee
               </h1>
               <p className="text-[10px] text-amber-300 font-mono">
-                Order #{orderNumber(orderId)}
+                Order {displayCurrentOrderNumber}
               </p>
             </div>
           </div>
@@ -631,6 +933,356 @@ function OrderStatusPageContent() {
 
         {order && (
           <>
+            <section className="space-y-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="font-serif text-sm font-bold text-stone-900">
+                  Other recent orders
+                </h2>
+                <span className="text-[11px] font-medium text-stone-500">
+                  {otherTrackedOrders.length} order{otherTrackedOrders.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              {trackedOrdersError && (
+                <p className="mb-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  {trackedOrdersError}
+                </p>
+              )}
+              {orderNumberError && (
+                <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {orderNumberError}
+                </p>
+              )}
+              {trackedOrdersLoading ? (
+                <p className="text-xs text-stone-500">Loading your orders…</p>
+              ) : otherTrackedOrders.length > 0 ? (
+                <div className="space-y-3">
+                  {otherTrackedOrders.map((trackedOrder) => {
+                    const isPaid = trackedOrder.payment_status === "paid";
+                    const isWaitingForVerification =
+                      trackedOrder.payment_status === "pending_verification";
+                    const statusLabel = isPaid
+                      ? trackedOrder.status === "received"
+                        ? "Paid"
+                        : trackedOrder.status.charAt(0).toUpperCase() +
+                          trackedOrder.status.slice(1)
+                      : isWaitingForVerification
+                        ? "Awaiting verification"
+                        : "Awaiting payment";
+                    const isTrackedOrderActive = isPaid || isWaitingForVerification;
+                    const isTrackedOrderServed = trackedOrder.status === "served";
+                    const trackedPaymentLabel = isPaid
+                      ? "Confirmed"
+                      : isWaitingForVerification
+                        ? "Awaiting Verification"
+                        : "Awaiting Payment";
+                    const isTrackedTakeaway = trackedOrder.fulfillment_type
+                      .toLowerCase()
+                      .includes("take");
+                    const isTrackedOrderExpanded = expandedTrackedOrders.includes(
+                      trackedOrder.id,
+                    );
+                    const trackedOrderNumber = orderNumber(trackedOrder.id);
+                    const trackedOrderCode =
+                      trackedOrderNumber === "…"
+                        ? trackedOrder.id
+                        : `#${trackedOrderNumber}`;
+                    return (
+                      <div
+                        key={trackedOrder.id}
+                        className="rounded-2xl border border-stone-200/80 bg-white shadow-sm transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-3 rounded-t-2xl px-4 py-3">
+                          <button
+                            type="button"
+                            aria-label={`Open details for order ${trackedOrderCode}`}
+                            onClick={() => {
+                              router.push(
+                                `/${restaurantSlug}/order/${trackedOrder.id}?table=${encodeURIComponent(
+                                  trackedOrder.table_id ?? queryTable,
+                                )}`,
+                              );
+                            }}
+                            className="min-w-0 text-left"
+                          >
+                            <span className="min-w-0">
+                              <span className="flex flex-wrap items-center gap-2">
+                                <span className="font-mono text-sm font-bold text-stone-900">
+                                  Order {trackedOrderCode}
+                                </span>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                    isPaid
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : isWaitingForVerification
+                                        ? "bg-amber-100 text-amber-800"
+                                        : "bg-stone-200 text-stone-700"
+                                  }`}
+                                >
+                                  {statusLabel}
+                                </span>
+                              </span>
+                              <span className="mt-1 block truncate text-xs text-stone-500">
+                                {trackedOrder.itemSummary || "Items unavailable"}
+                              </span>
+                            </span>
+                          </button>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedTrackedOrders((expanded) =>
+                                  isTrackedOrderExpanded
+                                    ? expanded.filter((id) => id !== trackedOrder.id)
+                                    : [...expanded, trackedOrder.id],
+                                )
+                              }
+                              aria-label={`${isTrackedOrderExpanded ? "Hide" : "Show"} details for order ${
+                                trackedOrderCode
+                              }`}
+                              aria-expanded={isTrackedOrderExpanded}
+                              className="rounded-full p-1 text-stone-500 transition-colors hover:bg-white hover:text-stone-900"
+                            >
+                              <ChevronDown
+                                className={`h-5 w-5 transition-transform ${
+                                  isTrackedOrderExpanded ? "rotate-180" : ""
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                        {isTrackedOrderExpanded && (
+                          <div className="space-y-4 border-t border-stone-200/80 px-3 py-3">
+                            <div className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-sm">
+                              <div className="flex items-center justify-between gap-3 border-b border-stone-100 pb-3">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#2B1810] text-amber-400">
+                                    {isTrackedTakeaway ? (
+                                      <ShoppingBag className="h-5 w-5" />
+                                    ) : (
+                                      <UtensilsCrossed className="h-5 w-5" />
+                                    )}
+                                  </div>
+                                  <p className="min-w-0 break-all text-xs text-stone-500">
+                                    Order ID: {trackedOrder.id}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
+                                    isPaid
+                                      ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                                      : isWaitingForVerification
+                                        ? "border-amber-300 bg-amber-100 text-amber-800"
+                                        : "border-stone-300 bg-stone-100 text-stone-700"
+                                  }`}
+                                >
+                                  {isPaid ? (
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                  ) : (
+                                    <Clock className="h-3.5 w-3.5" />
+                                  )}
+                                  {trackedPaymentLabel}
+                                </span>
+                              </div>
+                              {trackedOrder.items.length > 0 ? (
+                                <div className="space-y-2 pt-4">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">
+                                    Ordered Items
+                                  </p>
+                                  {trackedOrder.items.map((item, index) => (
+                                    <div
+                                      key={`${trackedOrder.id}-${index}`}
+                                      className="flex items-center justify-between gap-3 text-sm"
+                                    >
+                                      <span className="text-stone-700">
+                                        <span className="font-semibold text-stone-900">
+                                          {item.quantity}x
+                                        </span>{" "}
+                                        {item.name}
+                                      </span>
+                                      <span className="shrink-0 font-medium text-stone-900">
+                                        {(item.unit_price * item.quantity).toLocaleString()} ETB
+                                      </span>
+                                    </div>
+                                  ))}
+                                  <div className="space-y-1 border-t border-dashed border-stone-200 pt-3 text-sm">
+                                    <div className="flex justify-between text-xs text-stone-500">
+                                      <span>Subtotal</span>
+                                      <span>{trackedOrder.subtotal.toLocaleString()} ETB</span>
+                                    </div>
+                                    <div className="flex justify-between text-xs text-stone-500">
+                                      <span>Service Fee</span>
+                                      <span>{trackedOrder.serviceFee.toLocaleString()} ETB</span>
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1 font-bold text-stone-900">
+                                      <span>Total Amount</span>
+                                      <span className="text-base text-[#2B1810]">
+                                        {trackedOrder.total.toLocaleString()} ETB
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="pt-4 text-xs text-stone-500">
+                                  Order items are unavailable.
+                                </p>
+                              )}
+                            </div>
+                            {isTrackedOrderActive && (
+                              <div className="space-y-4">
+                                <div className="space-y-4 rounded-3xl border border-stone-200/80 bg-white p-5 shadow-sm">
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-3">
+                                    <h3 className="font-serif text-base font-bold text-stone-900">
+                                      Live Order Tracker
+                                    </h3>
+                                    <span className="font-mono text-xs font-extrabold text-amber-700">
+                                      {trackedOrderNumber === "…"
+                                        ? "number unavailable"
+                                        : `#${trackedOrderNumber}`}
+                                    </span>
+                                  </div>
+                                  {trackedOrder.status === "cancelled" ? (
+                                    <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800">
+                                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                      <span>This order was cancelled.</span>
+                                    </div>
+                                  ) : (
+                                    <OrderStatusTracker
+                                      currentStatus={trackedOrder.status}
+                                      paymentConfirmed={isPaid}
+                                      orderKind={trackedOrder.orderKind}
+                                    />
+                                  )}
+                                  <div className="flex items-center justify-between border-t border-stone-100 pt-3 text-xs text-stone-500">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+                                      <span className="font-semibold text-stone-700">
+                                        Kitchen &amp; Bar Station
+                                      </span>
+                                    </div>
+                                    <span className="text-[11px] text-stone-400">
+                                      Synced in real-time
+                                    </span>
+                                  </div>
+                                </div>
+                                {isTrackedOrderServed ? (
+                                  <div className="rounded-3xl border-2 border-emerald-200 bg-emerald-50 p-6 text-center shadow-sm">
+                                    <CheckCircle2 className="mx-auto mb-2 h-10 w-10 text-emerald-600" />
+                                    <p className="font-serif text-lg font-bold text-emerald-900">
+                                      Served — enjoy your meal!
+                                    </p>
+                                    <p className="mt-1 text-xs text-emerald-700">
+                                      Your verification code is no longer needed.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="relative overflow-hidden rounded-3xl border-2 border-dashed border-[#2B1810] bg-white p-6 text-center shadow-md">
+                                    <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+                                      <CheckCircle2 className="h-3.5 w-3.5" />
+                                      {isPaid ? "Verified & Active" : "Receipt Submitted"}
+                                    </div>
+                                    {!isPaid && (
+                                      <p className="mb-2 text-xs font-semibold text-amber-800">
+                                        Your payment receipt is awaiting cashier verification. You do not need to submit or pay again.
+                                      </p>
+                                    )}
+                                    <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-stone-500">
+                                      Your 4-Digit Pickup / Verification Code
+                                    </p>
+                                    <div className="my-3 inline-flex items-center justify-center gap-2 rounded-2xl border border-[#2B1810] bg-[#38210F] px-6 py-3 text-amber-400 shadow-inner">
+                                      <span className="pl-2 font-mono text-4xl font-black tracking-[0.35em]">
+                                        {visibleTrackedPickupCodes.includes(trackedOrder.id)
+                                          ? trackedOrder.pickupCode ?? "••••"
+                                          : "••••"}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setVisibleTrackedPickupCodes((visible) =>
+                                            visible.includes(trackedOrder.id)
+                                              ? visible.filter((id) => id !== trackedOrder.id)
+                                              : [...visible, trackedOrder.id],
+                                          )
+                                        }
+                                        className="rounded-lg border border-amber-500/40 bg-[#2B1810] p-2 text-amber-200 transition-colors hover:text-white"
+                                        aria-label={
+                                          visibleTrackedPickupCodes.includes(trackedOrder.id)
+                                            ? "Hide pickup code"
+                                            : "Show pickup code"
+                                        }
+                                      >
+                                        {visibleTrackedPickupCodes.includes(trackedOrder.id) ? (
+                                          <EyeOff className="h-4 w-4" />
+                                        ) : (
+                                          <Eye className="h-4 w-4" />
+                                        )}
+                                      </button>
+                                    </div>
+                                    <p className="mx-auto mt-2 max-w-sm text-xs text-stone-500">
+                                      Provide this 4-digit code to your waiter or show it at the pickup station when collecting your food.
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-stone-500">
+                  No other recent orders were found.
+                </p>
+              )}
+            </section>
+
+            <button
+              type="button"
+              onClick={() => setOrderDetailsExpanded((expanded) => !expanded)}
+              aria-expanded={orderDetailsExpanded}
+              className="w-full rounded-2xl border border-stone-200/80 bg-white px-4 py-3 text-left shadow-sm transition-colors hover:bg-stone-50"
+            >
+              <span className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="font-serif text-sm font-bold text-stone-900">
+                      Order {displayCurrentOrderNumber}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                        paymentApproved
+                          ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                          : paymentSubmitted
+                            ? "border-amber-300 bg-amber-100 text-amber-800"
+                            : "border-stone-300 bg-stone-100 text-stone-700"
+                      }`}
+                    >
+                      {paymentApproved
+                        ? "Paid"
+                        : paymentSubmitted
+                          ? "Awaiting verification"
+                          : "Awaiting payment"}
+                    </span>
+                  </span>
+                  <span className="mt-1 block truncate text-xs text-stone-500">
+                    {orderedItems.length
+                      ? `${orderedQuantity} item${orderedQuantity === 1 ? "" : "s"} · ${orderedItems
+                          .map((item) => `${item.quantity}× ${item.name}`)
+                          .join(", ")}`
+                      : "Order details"}
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`h-5 w-5 shrink-0 text-stone-500 transition-transform ${
+                    orderDetailsExpanded ? "rotate-180" : ""
+                  }`}
+                />
+              </span>
+            </button>
+
+            {orderDetailsExpanded && (
+              <>
             {/* Order Meta Card */}
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-stone-200/80">
               <div className="flex items-center justify-between border-b border-stone-100 pb-4">
@@ -718,8 +1370,8 @@ function OrderStatusPageContent() {
               )}
             </div>
 
-            {/* LIVE ORDER TRACKER — always visible so tracking never dumps the
-                diner back into the payment form as the headline section. */}
+            {/* Show progress only after the diner submits proof or payment is approved. */}
+            {isActive && (
             <div className="bg-white rounded-3xl p-6 shadow-sm border border-stone-200/80 space-y-4">
               <div className="flex items-center justify-between border-b border-stone-100 pb-3">
                 <h3 className="font-serif font-bold text-base text-stone-900">
@@ -728,7 +1380,7 @@ function OrderStatusPageContent() {
                 <div className="flex items-center gap-2">
                   {/* Same number the kitchen/bar/floor screens show for this order. */}
                   <span className="font-mono text-sm font-extrabold text-amber-700 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg">
-                    #{orderNumber(orderId)}
+                    {displayCurrentOrderNumber}
                   </span>
                   <span className="text-xs text-stone-400">Updates live</span>
                 </div>
@@ -762,8 +1414,11 @@ function OrderStatusPageContent() {
                 </span>
               </div>
             </div>
+            )}
+              </>
+            )}
 
-            {/* STATE 1: AWAITING PAYMENT / VERIFICATION (secondary, below tracker) */}
+            {/* STATE 1: AWAITING PAYMENT / VERIFICATION */}
             {!isActive && (
               <div className="space-y-6 animate-fadeIn">
                 <h3 className="font-serif font-bold text-base text-stone-900">
@@ -783,11 +1438,21 @@ function OrderStatusPageContent() {
                 </div>
 
                 <div className="bg-[#FAF5EC] rounded-2xl p-5 shadow-sm border border-[#D4B896] space-y-4">
-                  <PaymentAccountPicker
-                    accounts={accounts}
-                    selectedAccountId={selectedAccountId}
-                    onSelect={(account) => setSelectedAccountId(account.id)}
-                  />
+                  {accountsLoading ? (
+                    <p className="text-xs text-stone-500">Loading payment accounts…</p>
+                  ) : accounts.length > 0 ? (
+                    <PaymentAccountPicker
+                      accounts={accounts}
+                      selectedAccountId={selectedAccountId}
+                      onSelect={(account) => setSelectedAccountId(account.id)}
+                    />
+                  ) : (
+                    <p className="text-xs text-rose-700">
+                      {accountLoadError
+                        ? "Could not load payment accounts. Refresh this page or ask staff for help."
+                        : "No payment accounts are available right now. Please ask staff for help."}
+                    </p>
+                  )}
                 </div>
 
                 {/* Proof Upload */}
@@ -801,6 +1466,13 @@ function OrderStatusPageContent() {
                   </p>
                   <ProofUpload onFileSelect={(file) => setUploadedFile(file)} />
                 </div>
+
+                {proofStatusError && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-3 text-xs flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{proofStatusError}</span>
+                  </div>
+                )}
 
                 {submitError && (
                   <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-3 text-xs flex items-start gap-2">
@@ -818,7 +1490,7 @@ function OrderStatusPageContent() {
                 )}
                 <button
                   onClick={handleSubmitProof}
-                  disabled={isSubmitting || !uploadedFile}
+                  disabled={isSubmitting || !uploadedFile || !selectedAccountId || !!proofStatusError}
                   className="w-full py-4 px-6 bg-[#2B1810] hover:bg-[#3D2415] active:bg-[#2A180B] text-white rounded-2xl font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 text-base disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#2B1810]"
                 >
                   {isSubmitting ? (
@@ -837,37 +1509,8 @@ function OrderStatusPageContent() {
             )}
 
             {/* STATE 2: CONFIRMED / ACTIVE */}
-            {isActive && (
+            {isActive && orderDetailsExpanded && (
               <div className="space-y-6 animate-fadeIn">
-                {/* Queue transparency: orders ahead + estimated wait (gone once served) */}
-                {!isServed && queueInfo && (
-                  <div className="bg-white rounded-2xl p-4 shadow-sm border border-stone-200/80">
-                    <div className="flex items-center justify-around gap-3 text-center">
-                      <div>
-                        <p className="text-2xl font-serif font-black text-[#2B1810]">
-                          {queueInfo.ahead}
-                        </p>
-                        <p className="text-[11px] text-stone-500 font-semibold">
-                          order{queueInfo.ahead === 1 ? "" : "s"} ahead of you
-                        </p>
-                      </div>
-                      <div className="w-px h-10 bg-stone-200" />
-                      <div>
-                        <p className="text-2xl font-serif font-black text-[#2B1810] flex items-center justify-center gap-1">
-                          <Clock className="w-5 h-5 text-amber-600" />
-                          {queueInfo.etaMinutes}
-                          <span className="text-sm font-bold text-stone-500">
-                            min
-                          </span>
-                        </p>
-                        <p className="text-[11px] text-stone-500 font-semibold">
-                          estimated wait
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {/* Big 4-Digit Pickup Code Box — auto-removed once the food is served */}
                 {!isServed ? (
                   <div className="bg-white border-2 border-dashed border-[#2B1810] rounded-3xl p-6 text-center shadow-md relative overflow-hidden">
@@ -1025,7 +1668,6 @@ function OrderStatusPageContent() {
       {!isTakeaway && order?.table_id && (
         <CallWaiterButton
           tableId={order.table_id}
-          tableLabel={`Table ${mockTable}`}
         />
       )}
     </div>

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   UtensilsCrossed,
-  Wine,
   UserCheck,
   CreditCard,
   LayoutDashboard,
@@ -103,7 +102,6 @@ export default function StaffHeader({
 
   const allNavLinks = [
     { label: "Kitchen", href: "/staff/kitchen", icon: UtensilsCrossed },
-    { label: "Bar", href: "/staff/bar", icon: Wine },
     { label: "Floor", href: "/staff/floor", icon: UserCheck },
     { label: "Cashier", href: "/staff/payments", icon: CreditCard },
     { label: "Admin", href: "/admin/menu", icon: LayoutDashboard },
@@ -114,7 +112,6 @@ export default function StaffHeader({
     roleInfo.role === "super_admin" || roleInfo.role === "owner";
   const isAdmin = roleInfo.role === "admin";
   const isKitchenStation = pathname.startsWith("/staff/kitchen");
-  const isBarStation = pathname.startsWith("/staff/bar");
   const isFloorStation = pathname.startsWith("/staff/floor");
   const isPaymentsStation = pathname.startsWith("/staff/payments");
   const canOpenCustomerView =
@@ -131,7 +128,6 @@ export default function StaffHeader({
     // Admin has operational monitoring access
     visibleNavLinks = [
       { label: "Kitchen", href: "/staff/kitchen", icon: UtensilsCrossed },
-      { label: "Bar", href: "/staff/bar", icon: Wine },
       { label: "Floor", href: "/staff/floor", icon: UserCheck },
       { label: "Admin", href: "/admin/menu", icon: LayoutDashboard },
     ];
@@ -141,8 +137,8 @@ export default function StaffHeader({
       { label: "Kitchen", href: "/staff/kitchen", icon: UtensilsCrossed },
     ];
   } else if (roleInfo.role === "bar" || roleInfo.role === "bartender") {
-    // Bar staff can ONLY see Bar console
-    visibleNavLinks = [{ label: "Bar", href: "/staff/bar", icon: Wine }];
+    // Bar staff use the direct console route; it is not shown in station navigation.
+    visibleNavLinks = [];
   } else if (roleInfo.role === "waiter") {
     // Waiter can ONLY see Floor console
     visibleNavLinks = [
@@ -159,8 +155,6 @@ export default function StaffHeader({
       visibleNavLinks = [
         { label: "Kitchen", href: "/staff/kitchen", icon: UtensilsCrossed },
       ];
-    else if (isBarStation)
-      visibleNavLinks = [{ label: "Bar", href: "/staff/bar", icon: Wine }];
     else if (isFloorStation)
       visibleNavLinks = [
         { label: "Floor", href: "/staff/floor", icon: UserCheck },

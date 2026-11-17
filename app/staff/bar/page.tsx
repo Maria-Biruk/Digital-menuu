@@ -31,11 +31,13 @@ function BarConsoleContent() {
   const [mounted, setMounted] = useState(false);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketsLoaded, setTicketsLoaded] = useState(false);
   const [barMenu, setBarMenu] = useState<MenuItem[]>([]);
 
   const loadTickets = useCallback(async () => {
     try {
       setTickets(await fetchStationTickets("bar"));
+      setTicketsLoaded(true);
     } catch (err) {
       console.error("Failed to load bar tickets", err);
     }
@@ -63,6 +65,7 @@ function BarConsoleContent() {
       title: t("New Bar Order"),
       message: `☕ #${orderNumber(tk.order_id)} · ${tk.table_label}: ${tk.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}`,
     }),
+    ticketsLoaded,
   );
 
   const handleAdvance = async (ticketId: string) => {

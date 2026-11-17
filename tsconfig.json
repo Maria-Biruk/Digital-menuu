@@ -2,7 +2,11 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
     "target": "es2020",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -14,9 +18,15 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ]
     }
   },
   "include": [
@@ -24,7 +34,19 @@
     "global.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next/types/**/*.ts"
+    ".next/types/**/*.ts",
+    ".next-dev-*/types/**/*.ts",
+    ".next-dev-56000/types/**/*.ts",
+    ".next-dev-257760/types/**/*.ts",
+    ".next-dev-267560/types/**/*.ts",
+    ".next-dev-268148/types/**/*.ts",
+    ".next-dev-272860/types/**/*.ts",
+    ".next-dev-190076/types/**/*.ts",
+    ".next-dev-297588/types/**/*.ts",
+    ".next-dev-74908/types/**/*.ts",
+    ".next-dev-176720/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }

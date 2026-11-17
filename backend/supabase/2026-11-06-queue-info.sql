@@ -2,7 +2,7 @@
 -- Diner-facing queue transparency:
 --   "3 orders ahead of you · about 18 minutes"
 -- Returns the caller's own rank in the live kitchen/bar queue plus an ETA
--- derived from the tickets that are still ahead of them.
+-- derived from active kitchen/bar tickets that are still ahead of them.
 --
 -- Run this once in the Supabase SQL Editor.
 -- ============================================================================
@@ -36,15 +36,27 @@ begin
     return jsonb_build_object('ok', true, 'ahead', 0, 'total_active', 0, 'eta_minutes', 0);
   end if;
 
-  -- Orders in the queue ahead of this one (older, still unfinished).
+  -- Count only orders that have actually been released to a kitchen or bar
+  -- station. Unpaid orders with held tickets are not ahead in the live queue.
   select count(*) into v_ahead
     from public.orders o
-   where o.status in ('received', 'preparing', 'ready')
+   where exists (
+         select 1
+           from public.order_station_tickets t
+          where t.order_id = o.id
+            and t.status in ('queued', 'preparing', 'ready')
+       )
+     and o.status not in ('served', 'cancelled')
      and o.created_at < v_order.created_at;
 
   select count(*) into v_total_active
     from public.orders o
-   where o.status in ('received', 'preparing', 'ready');
+   where exists (
+         select 1
+           from public.order_station_tickets t
+          where t.order_id = o.id
+            and t.status in ('queued', 'preparing', 'ready')
+       );
 
   -- ETA: work already in progress (max remaining ticket time per order) plus
   -- this order's own estimated prep. Falls back to the item prep estimates.
@@ -58,7 +70,7 @@ begin
            ) as mins_ahead
       from public.orders o
       join public.order_station_tickets t on t.order_id = o.id
-     where o.status in ('received', 'preparing')
+     where t.status in ('queued', 'preparing')
        and o.created_at < v_order.created_at
      group by o.id
   ),

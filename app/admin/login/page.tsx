@@ -7,108 +7,85 @@ import {
   Lock,
   User,
   ArrowLeft,
-  ShieldCheck,
   ShieldAlert,
-  Wine,
-  UserCheck,
-  CreditCard,
-  Crown,
-  ChefHat,
 } from "lucide-react";
-import { signInStaff, fetchStaffRole } from "@/lib/supabase";
+import { signInStaff, fetchStaffRole, signOutStaff, supabaseBrowser } from "@/lib/supabase";
+import { getStaffHomeRoute } from "@/lib/permissions";
 import { STAFF_LANG_LABEL, useStaffLang, type StaffLang } from "@/lib/i18n/staff";
 import { Languages } from "lucide-react";
-
-// Verified staff account used for one-click dev access (also used by backend/scripts/smoke.mjs).
-const DEMO_SESSION = { email: "mayabrook1924@gmail.com", password: "mayanan0909" };
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const { t, lang, setLang } = useStaffLang();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("demo123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const roles = [
-    { name: t("Super Admin"), username: "superadmin", roleKey: "super_admin", target: "/admin/menu", icon: Crown, color: "text-amber-400", desc: t("Master Control") },
-    { name: t("Admin"), username: "admin", roleKey: "admin", target: "/admin/menu", icon: ShieldCheck, color: "text-blue-400", desc: t("Limited Ops") },
-    { name: t("Kitchen"), username: "chef", roleKey: "kitchen", target: "/staff/kitchen", icon: ChefHat, color: "text-emerald-400", desc: t("Kitchen Only") },
-    { name: t("Bartender"), username: "bar", roleKey: "bar", target: "/staff/bar", icon: Wine, color: "text-purple-400", desc: t("Bar Only") },
-    { name: t("Waiter"), username: "waiter", roleKey: "waiter", target: "/staff/floor", icon: UserCheck, color: "text-cyan-400", desc: t("Floor Only") },
-    { name: t("Cashier"), username: "cashier", roleKey: "cashier", target: "/staff/payments", icon: CreditCard, color: "text-amber-300", desc: t("Cashier Only") },
-  ];
-
-  // Establish a real Supabase session so station consoles can read live data (RLS),
-  // then apply the chosen role in localStorage purely for UI routing/preview.
-  const quickAccess = async (roleKey: string, target: string) => {
-    setError("");
-    setLoading(true);
-    try {
-      await signInStaff(DEMO_SESSION.email, DEMO_SESSION.password);
-      localStorage.setItem("staff_role", roleKey);
-      router.push(target);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("Sign in failed"));
-      setLoading(false);
-    }
-  };
+  const [resetMessage, setResetMessage] = useState("");
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      setError(t("Please enter your staff email."));
+      return;
+    }
+    if (!normalizedEmail.includes("@")) {
+      setError(t("Please include an '@' in the email address."));
+      return;
+    }
+
     setError("");
     setLoading(true);
     try {
-      // If a real email was typed, do a genuine Supabase login + DB role lookup.
-      if (username.includes("@")) {
-        await signInStaff(username.trim(), password);
-        const role = await fetchStaffRole();
-        if (!role) {
-          setError(t("Signed in, but this account has no active staff role in staff_users."));
-          setLoading(false);
-          return;
-        }
-        localStorage.setItem("staff_role", role);
-        const target =
-          role === "kitchen" ? "/staff/kitchen"
-            : role === "bar" || role === "bartender" ? "/staff/bar"
-            : role === "waiter" ? "/staff/floor"
-            : role === "cashier" ? "/staff/payments"
-            : "/admin/menu";
-        router.push(target);
+      await signInStaff(normalizedEmail, password);
+      const role = await fetchStaffRole();
+      if (!role) {
+        await signOutStaff();
+        setError(t("This account is pending approval, suspended, or not assigned an active staff role."));
+        setLoading(false);
         return;
       }
-
-      // Otherwise: demo username → map to a role and open with the real session.
-      const lower = username.toLowerCase();
-      let roleKey = "admin";
-      let targetUrl = "/admin/menu";
-      if (lower.includes("super") || lower.includes("owner")) {
-        roleKey = "super_admin";
-      } else if (lower.includes("bar")) {
-        roleKey = "bar";
-        targetUrl = "/staff/bar";
-      } else if (lower.includes("kitchen") || lower.includes("chef")) {
-        roleKey = "kitchen";
-        targetUrl = "/staff/kitchen";
-      } else if (lower.includes("waiter") || lower.includes("floor")) {
-        roleKey = "waiter";
-        targetUrl = "/staff/floor";
-      } else if (lower.includes("cashier") || lower.includes("pos")) {
-        roleKey = "cashier";
-        targetUrl = "/staff/payments";
+      const destination = getStaffHomeRoute(role);
+      if (destination === "/admin/login") {
+        await signOutStaff();
+        setError(t("This account does not have a supported staff role."));
+        setLoading(false);
+        return;
       }
-      await quickAccess(roleKey, targetUrl);
+      localStorage.setItem("staff_role", role);
+      router.replace(destination);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("Sign in failed"));
       setLoading(false);
     }
   };
 
-  const handleRoleClick = (role: (typeof roles)[0]) => {
-    setUsername(role.username);
-    setPassword("demo123");
-    void quickAccess(role.roleKey, role.target);
+  const handleForgotPassword = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
+      setError(t("Enter your email above to receive a password reset link."));
+      setResetMessage("");
+      return;
+    }
+
+    setError("");
+    setResetMessage("");
+    setResettingPassword(true);
+    try {
+      const { error: resetError } = await supabaseBrowser().auth.resetPasswordForEmail(
+        normalizedEmail,
+        { redirectTo: `${window.location.origin}/auth/callback?next=/admin/set-password` },
+      );
+      if (resetError) throw new Error(resetError.message);
+      setResetMessage(t("If an account exists for this email, a password reset link has been sent."));
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : t("Could not send a password reset link."));
+    } finally {
+      setResettingPassword(false);
+    }
   };
 
   return (
@@ -172,24 +149,35 @@ export default function AdminLoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5 flex items-center gap-1.5">
-                <User className="w-3 h-3 text-amber-400" /> {t("Username")}
+                <User className="w-3 h-3 text-amber-400" />
+                {t("Email")}
               </label>
               <input
-                type="text"
+                type="email"
                 required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder={t("Enter staff username")}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder={t("Enter staff email")}
                 autoComplete="username"
-                inputMode="text"
+                inputMode="email"
                 className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-base text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-1.5 flex items-center gap-1.5">
-                <Lock className="w-3 h-3 text-amber-400" /> {t("Password")}
-              </label>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-stone-400">
+                  <Lock className="w-3 h-3 text-amber-400" /> {t("Password")}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleForgotPassword()}
+                  disabled={resettingPassword}
+                  className="text-[11px] font-semibold text-amber-300 hover:text-amber-200 disabled:opacity-60"
+                >
+                  {resettingPassword ? t("Sending...") : t("Forgot password?")}
+                </button>
+              </div>
               <input
                 type="password"
                 required
@@ -200,10 +188,13 @@ export default function AdminLoginPage() {
                 inputMode="text"
                 className="w-full px-4 py-3 rounded-xl border border-[#2B1810] bg-[#38210F] text-base text-white focus:outline-none focus:border-amber-500 placeholder:text-stone-600 transition-colors"
               />
-              <p className="text-[10px] text-stone-500 mt-1">
-                {t("Demo mode: any username/password opens a live staff session. Type a real email for a true login.")}
-              </p>
             </div>
+
+            {resetMessage && (
+              <p role="status" className="rounded-xl border border-emerald-800/50 bg-emerald-950/30 p-3 text-xs font-medium text-emerald-200">
+                {resetMessage}
+              </p>
+            )}
 
             <button
               type="submit"
@@ -221,34 +212,6 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          {/* Role Buttons Quick Launch */}
-          <div className="mt-6 sm:mt-8 pt-5 sm:pt-6 border-t border-[#2B1810]">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 text-center mb-3">
-              {t("Quick Sandbox Access")}
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {roles.map((r) => {
-                const Icon = r.icon;
-                return (
-                  <button
-                    key={r.name}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => handleRoleClick(r)}
-                    className="min-h-[44px] p-2.5 rounded-xl bg-[#38210F] hover:bg-[#2B1810] border border-[#2B1810] hover:border-amber-500/50 flex flex-col items-center justify-center gap-1 transition-all text-center group cursor-pointer disabled:opacity-60"
-                  >
-                    <Icon className={`w-4 h-4 ${r.color} group-hover:scale-110 transition-transform`} />
-                    <span className="text-xs font-bold text-stone-200 group-hover:text-white leading-tight">
-                      {r.name}
-                    </span>
-                    <span className="text-[10px] text-stone-500 font-medium">
-                      {r.desc}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
       </div>
     </div>

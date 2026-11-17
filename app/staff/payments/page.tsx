@@ -63,6 +63,7 @@ function CashierPaymentsContent() {
     setIsSuperAdmin(saved === "super_admin" || saved === "owner");
   }, []);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [paymentsLoaded, setPaymentsLoaded] = useState(false);
   const [existingTxIds, setExistingTxIds] = useState<string[]>([]);
   const [notification, setNotification] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -74,6 +75,7 @@ function CashierPaymentsContent() {
   const loadPayments = useCallback(async () => {
     try {
       setPayments(await fetchPendingPayments());
+      setPaymentsLoaded(true);
     } catch (err) {
       console.error("Failed to load pending payments", err);
     }
@@ -151,6 +153,7 @@ function CashierPaymentsContent() {
       title: t("New Payment to Verify"),
       message: `💳 #${orderNumber(p.order_id)} · ${p.account_label} · ${p.amount.toLocaleString()} ETB ${t("awaiting review")}`,
     }),
+    paymentsLoaded,
   );
 
   return (

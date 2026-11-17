@@ -36,8 +36,9 @@ import {
   Table,
 } from "../lib/types";
 import { SLUG, tI18n } from "../lib/mock";
-import { fetchCatalog, fetchTables } from "../lib/db";
+import { fetchCatalog, fetchTables, syncOrderNumbers } from "../lib/db";
 import { supabaseDiner, ensureDinerSession } from "../lib/supabase";
+import { hasOrderNumber, orderNumber } from "../lib/order-number";
 import {
   ensureNotifyPermission,
   playChime,
@@ -88,7 +89,11 @@ export default function DigitalMenuView({
   >(null);
 
   // Persisted order tracking (survives reload / back-navigation).
-  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [activeOrderIds, setActiveOrderIds] = useState<string[]>([]);
+  const activeOrderId = activeOrderIds[activeOrderIds.length - 1] ?? null;
+  const [numberedOrderIds, setNumberedOrderIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [cartHydrated, setCartHydrated] = useState(false);
   const [isActiveBannerDismissed, setIsActiveBannerDismissed] = useState(false);
 
@@ -107,8 +112,9 @@ export default function DigitalMenuView({
   const [bellOpen, setBellOpen] = useState(false);
   const [livePopup, setLivePopup] = useState<string | null>(null);
   const livePopupTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const prevOrderStatus = useRef<string | null>(null);
-  const prevPaymentStatus = useRef<string | null>(null);
+  const prevOrderStatus = useRef(new Map<string, string>());
+  const prevPaymentStatus = useRef(new Map<string, string>());
+  const previousTicketsByOrder = useRef(new Map<string, Map<string, string>>());
   const notifiedOrderUpdates = useRef(new Set<string>());
   const bellRef = useRef<HTMLDivElement>(null);
   const [notificationsLoaded, setNotificationsLoaded] = useState(false);
@@ -123,27 +129,25 @@ export default function DigitalMenuView({
   // Subscribe to order and station-ticket changes so the diner gets notified
   // while browsing the menu without navigating to the tracker page.
   useEffect(() => {
-    if (!activeOrderId) return;
+    if (!activeOrderIds.length) return;
     const sb = supabaseDiner();
-    prevOrderStatus.current = null;
-    notifiedOrderUpdates.current.clear();
-
-    const notify = (key: string, text: string) => {
-      const notificationKey = `${activeOrderId}:${key}`;
+    const notify = (orderId: string, key: string, text: string) => {
+      const notificationKey = `${orderId}:${key}`;
       if (notifiedOrderUpdates.current.has(notificationKey)) return;
       notifiedOrderUpdates.current.add(notificationKey);
       const notif: DinerNotification = {
-        id: `${activeOrderId}:${key}`,
+        id: `${orderId}:${key}`,
         text,
         read: false,
         ts: Date.now(),
       };
-      saveDinerNotification(notif);
+      const isNewNotification = saveDinerNotification(notif);
       setDinerNotifs((prev) =>
         prev.some((item) => item.id === notif.id)
           ? prev
           : [notif, ...prev].slice(0, 20),
       );
+      if (!isNewNotification) return;
       setLivePopup(text);
       playChime();
       pushNotification("Skill Coffee", text);
@@ -152,133 +156,127 @@ export default function DigitalMenuView({
     };
 
     let active = true;
-    let refreshing = false;
-    let previousTickets: Map<string, string> | null = null;
-    prevOrderStatus.current = null;
-    prevPaymentStatus.current = null;
-
-    const refreshOrderStatus = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const [{ data: order, error: orderError }, { data: tickets, error: ticketsError }] =
-          await Promise.all([
+    const channels = activeOrderIds.map((orderId) => {
+      let refreshing = false;
+      const refreshOrderStatus = async () => {
+        if (refreshing) return;
+        refreshing = true;
+        try {
+          const [
+            { data: order, error: orderError },
+            { data: tickets, error: ticketsError },
+          ] = await Promise.all([
             sb
               .from("orders")
               .select("status, payment_status")
-              .eq("id", activeOrderId)
+              .eq("id", orderId)
               .maybeSingle(),
             sb
               .from("order_station_tickets")
               .select("id, status")
-              .eq("order_id", activeOrderId),
+              .eq("order_id", orderId),
           ]);
 
-        if (orderError) {
-          console.error("Failed to refresh diner order notifications", orderError);
-          return;
-        }
-        if (ticketsError) {
-          console.error("Failed to refresh diner ticket notifications", ticketsError);
-          return;
-        }
-        if (!active || !order) return;
+          if (orderError) {
+            console.error("Failed to refresh diner order notifications", orderError);
+            return;
+          }
+          if (ticketsError) {
+            console.error("Failed to refresh diner ticket notifications", ticketsError);
+            return;
+          }
+          if (!active || !order) return;
 
-        const orderStatus = String(order.status ?? "");
-        if (prevOrderStatus.current === null) {
-          prevOrderStatus.current = orderStatus;
-        } else if (orderStatus !== prevOrderStatus.current) {
-          prevOrderStatus.current = orderStatus;
-          const label = STATUS_LABEL[orderStatus];
-          if (label) notify(orderStatus, label);
-        }
+          const orderStatus = String(order.status ?? "");
+          const previousStatus = prevOrderStatus.current.get(orderId);
+          prevOrderStatus.current.set(orderId, orderStatus);
 
-        const paymentStatus = String(order.payment_status ?? "");
-        if (prevPaymentStatus.current === null) {
-          prevPaymentStatus.current = paymentStatus;
-        } else if (
-          paymentStatus === "paid" &&
-          prevPaymentStatus.current !== "paid"
-        ) {
-          notify("payment-confirmed", "💳 Payment confirmed by the cashier.");
-          prevPaymentStatus.current = paymentStatus;
-        } else {
-          prevPaymentStatus.current = paymentStatus;
-        }
+          const paymentStatus = String(order.payment_status ?? "");
+          const previousPayment = prevPaymentStatus.current.get(orderId);
+          prevPaymentStatus.current.set(orderId, paymentStatus);
 
-        const currentTickets = new Map(
-          (tickets ?? []).map((ticket) => [
-            String(ticket.id),
-            String(ticket.status ?? ""),
-          ]),
-        );
-        if (previousTickets !== null) {
-          const oldStatuses = [...previousTickets.values()];
-          const newStatuses = [...currentTickets.values()];
-          const changedStatuses = [...currentTickets.entries()]
-            .filter(([id, status]) => previousTickets?.get(id) !== status)
-            .map(([, status]) => status);
-          if (changedStatuses.includes("queued")) {
-            notify("sent-to-kitchen", "📨 Your order has been sent to the kitchen.");
-          } else if (changedStatuses.includes("preparing")) {
-            notify("preparing", STATUS_LABEL.preparing);
+          const currentTickets = new Map(
+            (tickets ?? []).map((ticket) => [
+              String(ticket.id),
+              String(ticket.status ?? ""),
+            ]),
+          );
+          const previousTickets = previousTicketsByOrder.current.get(orderId);
+          previousTicketsByOrder.current.set(orderId, currentTickets);
+
+          const updates: Array<[string, string]> = [];
+          if (previousStatus !== undefined && orderStatus !== previousStatus) {
+            const label = STATUS_LABEL[orderStatus];
+            if (label) updates.push([orderStatus, label]);
+          }
+          if (paymentStatus === "paid" && previousPayment !== undefined && previousPayment !== "paid") {
+            updates.push(["payment-confirmed", "💳 Payment confirmed by the cashier."]);
+          }
+          if (previousTickets) {
+            const changedStatuses = [...currentTickets.entries()]
+              .filter(([id, status]) => previousTickets.get(id) !== status)
+              .map(([, status]) => status);
+            if (changedStatuses.includes("preparing")) {
+              updates.push(["preparing", STATUS_LABEL.preparing]);
+            } else if (changedStatuses.includes("queued")) {
+              updates.push(["sent-to-kitchen", "📨 Your order has been sent to the kitchen."]);
+            }
+            const wasReady = [...previousTickets.values()].length > 0 &&
+              [...previousTickets.values()].every((status) => status === "ready");
+            const isReady = [...currentTickets.values()].length > 0 &&
+              [...currentTickets.values()].every((status) => status === "ready");
+            if (isReady && !wasReady) updates.push(["ready", STATUS_LABEL.ready]);
           }
 
-          if (
-            newStatuses.length > 0 &&
-            newStatuses.every((status) => status === "ready") &&
-            !(
-              oldStatuses.length > 0 &&
-              oldStatuses.every((status) => status === "ready")
-            )
-          ) {
-            notify("ready", STATUS_LABEL.ready);
+          if (updates.length) {
+            await syncOrderNumbers([orderId], sb);
+            if (active) {
+              setNumberedOrderIds((previous) => new Set(previous).add(orderId));
+            }
+            for (const [key, text] of updates) {
+              const number = orderNumber(orderId);
+              notify(
+                orderId,
+                key,
+                `Order ${number === "…" ? "update" : `#${number}`} · ${text}`,
+              );
+            }
           }
+        } catch (error) {
+          console.error("Could not check diner order notification updates", error);
+        } finally {
+          refreshing = false;
         }
-        previousTickets = currentTickets;
-      } catch (error) {
-        console.error("Could not check diner order notification updates", error);
-      } finally {
-        refreshing = false;
-      }
-    };
+      };
 
-    const channel = sb
-      .channel(`diner-menu-order-${activeOrderId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "orders",
-          filter: `id=eq.${activeOrderId}`,
-        },
-        () => void refreshOrderStatus(),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "order_station_tickets",
-          filter: `order_id=eq.${activeOrderId}`,
-        },
-        () => void refreshOrderStatus(),
-      )
-      .subscribe();
-    void refreshOrderStatus();
-    const pollId = window.setInterval(() => {
+      const channel = sb
+        .channel(`diner-menu-order-${orderId}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "orders", filter: `id=eq.${orderId}` },
+          () => void refreshOrderStatus(),
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "order_station_tickets", filter: `order_id=eq.${orderId}` },
+          () => void refreshOrderStatus(),
+        )
+        .subscribe();
       void refreshOrderStatus();
-    }, 5000);
+      const pollId = window.setInterval(() => void refreshOrderStatus(), 5000);
+      return { channel, pollId, orderId };
+    });
 
     return () => {
       active = false;
-      window.clearInterval(pollId);
       clearTimeout(livePopupTimer.current);
-      void sb.removeChannel(channel);
+      for (const { channel, pollId } of channels) {
+        window.clearInterval(pollId);
+        void sb.removeChannel(channel);
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeOrderId]);
+  }, [activeOrderIds]);
 
   useEffect(() => {
     try {
@@ -465,24 +463,54 @@ export default function DigitalMenuView({
   // navigating back never loses the diner's basket or their order-status link.
   const cartKey = `dm_cart_${slug}_${effTableId}`;
   const orderKey = `dm_active_order_${slug}_${effTableId}`;
+  const ordersKey = `dm_active_orders_${slug}_${effTableId}`;
+  const allOrdersKey = `dm_active_orders_${slug}`;
 
   useEffect(() => {
     try {
       const savedCart = localStorage.getItem(cartKey);
       if (savedCart) setCartLines(JSON.parse(savedCart));
       const savedOrder = localStorage.getItem(orderKey);
-      if (savedOrder) setActiveOrderId(savedOrder);
+      const savedOrders = localStorage.getItem(ordersKey);
+      const savedAllOrders = localStorage.getItem(allOrdersKey);
+      const allOrders: unknown = savedAllOrders ? JSON.parse(savedAllOrders) : [];
+      const tableOrders: unknown = savedOrders ? JSON.parse(savedOrders) : [];
+      const parsedOrders = [
+        ...(Array.isArray(allOrders) ? allOrders : []),
+        ...(Array.isArray(tableOrders) ? tableOrders : []),
+      ];
+      const orderIds = Array.isArray(parsedOrders)
+        ? [...new Set(parsedOrders.filter((id): id is string => typeof id === "string"))]
+        : [];
+      if (savedOrder && !orderIds.includes(savedOrder)) orderIds.push(savedOrder);
+      setActiveOrderIds(orderIds);
       const isDismissed = localStorage.getItem(`${orderKey}_dismissed`) === "1";
       setIsActiveBannerDismissed(isDismissed);
     } catch {
       /* ignore malformed storage */
     }
     setCartHydrated(true);
-  }, [cartKey, orderKey]);
+  }, [allOrdersKey, cartKey, orderKey, ordersKey]);
 
   useEffect(() => {
     if (!activeOrderId) setIsActiveBannerDismissed(false);
   }, [activeOrderId]);
+
+  const rememberOrder = (newOrderId: string) => {
+    setActiveOrderIds((previous) => {
+      const next = [...previous.filter((id) => id !== newOrderId), newOrderId];
+      try {
+        localStorage.setItem(ordersKey, JSON.stringify(next));
+        localStorage.setItem(allOrdersKey, JSON.stringify(next));
+        localStorage.setItem(orderKey, newOrderId);
+        localStorage.removeItem(`${orderKey}_dismissed`);
+      } catch {
+        /* storage unavailable */
+      }
+      return next;
+    });
+    setIsActiveBannerDismissed(false);
+  };
 
   useEffect(() => {
     if (!cartHydrated) return;
@@ -628,15 +656,16 @@ export default function DigitalMenuView({
       if (error) throw new Error(error.message);
       const newOrderId = (data as { order_id?: string } | null)?.order_id;
       if (!newOrderId) throw new Error("Order created but no id returned");
+      const numberedOrders = await syncOrderNumbers([newOrderId], supabaseDiner());
+      if (numberedOrders > 0) {
+        setNumberedOrderIds((previous) => new Set(previous).add(newOrderId));
+      }
       try {
-        localStorage.setItem(orderKey, newOrderId);
         localStorage.removeItem(cartKey);
-        localStorage.removeItem(`${orderKey}_dismissed`);
       } catch {
         /* storage unavailable */
       }
-      setActiveOrderId(newOrderId);
-      setIsActiveBannerDismissed(false);
+      rememberOrder(newOrderId);
       setCartLines([]);
       router.push(
         `/${slug}/order/${newOrderId}?table=${effTableId}&lang=${lang}`,
@@ -678,14 +707,11 @@ export default function DigitalMenuView({
       if (error) throw new Error(error.message);
       const newOrderId = (data as { order_id?: string } | null)?.order_id;
       if (!newOrderId) throw new Error("Order created but no id returned");
-      try {
-        localStorage.setItem(orderKey, newOrderId);
-        localStorage.removeItem(`${orderKey}_dismissed`);
-      } catch {
-        /* storage unavailable */
+      const numberedOrders = await syncOrderNumbers([newOrderId], supabaseDiner());
+      if (numberedOrders > 0) {
+        setNumberedOrderIds((previous) => new Set(previous).add(newOrderId));
       }
-      setActiveOrderId(newOrderId);
-      setIsActiveBannerDismissed(false);
+      rememberOrder(newOrderId);
       setSelectedDish(null);
       const cleanPhone = encodeURIComponent(modalPhone.trim() || "");
       router.push(
@@ -924,49 +950,44 @@ export default function DigitalMenuView({
 
       {/* MAIN CONTAINER */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-28 space-y-10">
-        {/* ACTIVE ORDER TRACKER BANNER */}
-        {activeOrderId && !isActiveBannerDismissed && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-950/40 px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <UtensilsCrossed size={18} />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-emerald-200">
-                  You have an active order
-                </p>
-                <p className="text-xs text-emerald-300/70">
-                  Track its live kitchen status anytime.
+        {/* Active orders stay available from the Orders button; this is only a notification. */}
+        {activeOrderIds.length > 0 && !isActiveBannerDismissed && (
+          <div className="fixed right-4 top-20 z-40 w-[calc(100%-2rem)] max-w-md rounded-2xl border border-emerald-500/40 bg-[#263329]/95 p-3 shadow-xl backdrop-blur">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <UtensilsCrossed size={17} className="shrink-0 text-emerald-400" />
+                <p className="truncate text-sm font-bold text-emerald-100">
+                  Your orders ({activeOrderIds.length})
                 </p>
               </div>
-            </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() =>
-                  router.push(
-                    `/${slug}/order/${activeOrderId}?table=${tableId}&lang=${lang}`,
-                  )
-                }
-                className="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all cursor-pointer"
-              >
-                Track My Order
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  try {
-                    localStorage.setItem(`${orderKey}_dismissed`, "1");
-                  } catch {
-                    /* ignore */
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push(
+                      `/${slug}/order/${activeOrderId}?table=${tableId}&lang=${lang}`,
+                    )
                   }
-                  setIsActiveBannerDismissed(true);
-                }}
-                className="px-3 py-2 rounded-xl border border-emerald-500/30 text-emerald-300/80 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
-                title="Dismiss"
-              >
-                Dismiss
-              </button>
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-emerald-500"
+                >
+                  Track
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem(`${orderKey}_dismissed`, "1");
+                    } catch {
+                      /* ignore */
+                    }
+                    setIsActiveBannerDismissed(true);
+                  }}
+                  className="px-2 py-1 text-xs font-semibold text-emerald-300/80 transition-colors hover:text-white"
+                  title="Dismiss"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1572,7 +1593,16 @@ export default function DigitalMenuView({
       )}
 
       {/* Floating Call Waiter Button */}
-      <CallWaiterButton tableLabel={tableDisplay} />
+      <CallWaiterButton
+        tableId={
+          effTableId !== "takeaway"
+            ? chosenTable?.id ??
+              (tables.some((table) => table.id === tableId) ? tableId : undefined)
+            : undefined
+        }
+        tables={tables}
+        onTableSelect={pickArrivalTable}
+      />
 
       {/* ========================================================= */}
       {/* BOTTOM FLOATING CART BAR */}

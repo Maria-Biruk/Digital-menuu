@@ -1,5 +1,5 @@
 import { supabaseBrowser, supabaseDiner } from "./supabase";
-import { registerOrderNumbers } from "./order-number";
+import { orderNumber, registerOrderNumbers } from "./order-number";
 import type {
     Category,
     MenuItem,
@@ -163,7 +163,9 @@ export async function fetchStationTickets(station: Station): Promise<Ticket[]> {
         .in("status", ["held", "queued", "preparing", "ready"])
         .order("queued_at", { ascending: true });
     if (error) throw new Error(error.message);
-    return ((data ?? []) as Row[]).map(mapTicketRow);
+    const rows = (data ?? []) as Row[];
+    await syncOrderNumbers(rows.map((row) => String(row.order_id)));
+    return rows.map(mapTicketRow);
 }
 
 export async function fetchFloorTickets(): Promise<Ticket[]> {
@@ -173,7 +175,9 @@ export async function fetchFloorTickets(): Promise<Ticket[]> {
         .in("status", ["held", "queued", "preparing", "ready"])
         .order("queued_at", { ascending: true });
     if (error) throw new Error(error.message);
-    return ((data ?? []) as Row[]).map(mapTicketRow);
+    const rows = (data ?? []) as Row[];
+    await syncOrderNumbers(rows.map((row) => String(row.order_id)));
+    return rows.map(mapTicketRow);
 }
 
 /** All station tickets created for a single order (used by the cashier after approval). */
@@ -184,38 +188,34 @@ export async function fetchOrderTickets(orderId: string): Promise<Ticket[]> {
         .eq("order_id", orderId)
         .order("station");
     if (error) throw new Error(error.message);
-    return ((data ?? []) as Row[]).map(mapTicketRow);
+    const rows = (data ?? []) as Row[];
+    await syncOrderNumbers(rows.map((row) => String(row.order_id)));
+    return rows.map(mapTicketRow);
 }
 
 /**
- * Fill the order-number registry with sequential per-day numbers (#1, #2, #3…).
- * Give it anything carrying an order_id + its timestamp (tickets, payments,
- * an order row); every order of the involved days is fetched in arrival
- * order so ranks are complete. Failures are swallowed — orderNumber() then
- * falls back to the legacy hash code.
+ * Register the database-calculated daily order numbers for the requested IDs.
+ * The RPC only returns numbers for orders owned by the diner or visible to staff.
  */
-export async function syncOrderSequence(
-    items: { order_id: string; created_at: string }[],
-): Promise<void> {
-    if (!items.length) return;
-    const days = [...new Set(items.map((i) => String(i.created_at ?? "").slice(0, 10)))];
-    const sb = supabaseBrowser();
-    await Promise.all(
-        days
-            .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-            .map(async (day) => {
-                const { data, error } = await sb
-                    .from("orders")
-                    .select("id, created_at")
-                    .gte("created_at", `${day}T00:00:00.000Z`)
-                    .lte("created_at", `${day}T23:59:59.999Z`)
-                    .order("created_at", { ascending: true });
-                if (error || !data) return;
-                registerOrderNumbers(
-                    (data as Row[]).map((r, idx) => ({ orderId: String(r.id), seq: idx + 1 })),
-                );
-            }),
-    );
+export async function syncOrderNumbers(
+    orderIds: string[],
+    client: ReturnType<typeof supabaseBrowser> = supabaseBrowser(),
+): Promise<number> {
+    const ids = [...new Set(orderIds.filter(Boolean))];
+    if (!ids.length) return 0;
+    const { data, error } = await client.rpc("order_display_numbers", {
+        p_orders: ids,
+    });
+    if (error) {
+        console.error("Could not load sequential order numbers", error.message);
+        return 0;
+    }
+    const entries = ((data ?? []) as Row[]).map((row) => ({
+            orderId: String(row.order_id),
+            seq: Number(row.display_number),
+        })).filter((row) => Number.isInteger(row.seq) && row.seq > 0);
+    registerOrderNumbers(entries);
+    return entries.length;
 }
 
 export function subscribeTickets(onChange: () => void, table = "tickets-feed"): () => void {
@@ -317,11 +317,13 @@ export async function fetchOrderQueueInfo(orderId: string): Promise<QueueInfo | 
     const { data, error } = await supabaseDiner().rpc("order_queue_info", {
         p_order: orderId,
     });
-    if (error) return null;
+    if (error) throw new Error(error.message);
     const res = data as
         | { ok?: boolean; ahead?: number; total_active?: number; eta_minutes?: number }
         | null;
-    if (!res || res.ok !== true) return null;
+    if (!res || res.ok !== true) {
+        throw new Error(`Queue position was unavailable: ${res?.ok === false ? "request rejected" : "invalid response"}.`);
+    }
     return {
         ahead: Number(res.ahead ?? 0),
         totalActive: Number(res.total_active ?? 0),
@@ -330,7 +332,7 @@ export async function fetchOrderQueueInfo(orderId: string): Promise<QueueInfo | 
 }
 
 // ---------------------------------------------------------------------------
-// Staff account directory (Super Admin only, via SECURITY DEFINER RPC)
+// Staff directory (server API verifies the caller's role and restaurant scope)
 // ---------------------------------------------------------------------------
 
 export interface StaffAccount {
@@ -338,33 +340,89 @@ export interface StaffAccount {
     name: string;
     role: string;
     isActive: boolean;
+    status: "pending" | "approved" | "suspended";
     email: string | null;
     lastSeen: string | null;
     createdAt: string | null;
+    restaurantId: string | null;
+}
+
+export interface StaffRestaurant {
+    id: string;
+    name: string;
+}
+
+export interface StaffDirectory {
+    viewer: { id: string; role: string; restaurantId: string | null };
+    accounts: StaffAccount[];
+    restaurants: StaffRestaurant[];
+}
+
+async function staffManagementRequest<T>(
+    method: "GET" | "POST" | "PATCH" | "DELETE",
+    body?: Record<string, unknown>,
+): Promise<T> {
+    const sb = supabaseBrowser();
+    const { data, error: sessionError } = await sb.auth.getSession();
+    if (sessionError) throw new Error(sessionError.message);
+    const token = data.session?.access_token;
+    if (!token) throw new Error("Please sign in again.");
+
+    const response = await fetch("/api/admin/staff", {
+        method,
+        headers: {
+            Authorization: `Bearer ${token}`,
+            ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const result = await response.json() as { error?: string } & T;
+    if (!response.ok) throw new Error(result.error ?? `Staff request failed (${response.status}).`);
+    return result;
 }
 
 export async function fetchStaffAccounts(): Promise<StaffAccount[]> {
-    const { data, error } = await supabaseBrowser().rpc("admin_staff_accounts");
-    if (error) throw new Error(error.message);
-    return ((data ?? []) as Row[]).map((r) => ({
-        id: String(r.id),
-        name: String(r.name ?? "—"),
-        role: String(r.role ?? ""),
-        isActive: !!r.is_active,
-        email: r.email ? String(r.email) : null,
-        lastSeen: r.last_seen ? String(r.last_seen) : null,
-        createdAt: r.created_at ? String(r.created_at) : null,
-    }));
+    return (await fetchStaffDirectory()).accounts;
+}
+
+export async function fetchStaffDirectory(): Promise<StaffDirectory> {
+    return staffManagementRequest<StaffDirectory>("GET");
+}
+
+export async function setStaffAccountActive(staffUserId: string, active: boolean): Promise<void> {
+    await staffManagementRequest("PATCH", {
+        staffUserId,
+        status: active ? "approved" : "suspended",
+    });
+}
+
+export async function assignStaffRestaurant(staffUserId: string, restaurantId: string): Promise<void> {
+    await staffManagementRequest("PATCH", { staffUserId, restaurantId });
+}
+
+export async function createStaffAccount(input: {
+    name: string;
+    email: string;
+    role: string;
+    password: string;
+    restaurantId?: string;
+}): Promise<void> {
+    await staffManagementRequest("POST", input);
+}
+
+export async function deleteStaffAccount(staffUserId: string): Promise<void> {
+    await staffManagementRequest("DELETE", { staffUserId });
 }
 
 /**
  * Reset a staff member's login password via the server route (which holds the
  * service key). The browser client attaches the caller's bearer token so the
- * route can confirm they are a Super Admin before it writes to auth.
+ * route can verify role permissions and restaurant scope before writing to auth.
  */
 export async function resetStaffPassword(staffUserId: string, newPassword: string): Promise<void> {
     const sb = supabaseBrowser();
-    const { data } = await sb.auth.getSession();
+    const { data, error: sessionError } = await sb.auth.getSession();
+    if (sessionError) throw new Error(sessionError.message);
     const token = data.session?.access_token;
     const res = await fetch("/api/admin/staff-password", {
         method: "POST",
@@ -374,7 +432,7 @@ export async function resetStaffPassword(staffUserId: string, newPassword: strin
         },
         body: JSON.stringify({ staffUserId, newPassword }),
     });
-    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    const json = (await res.json()) as { ok?: boolean; error?: string };
     if (!res.ok || json?.ok === false) {
         throw new Error(json?.error ?? `Request failed (${res.status}).`);
     }
@@ -414,6 +472,7 @@ export async function fetchPendingPayments(): Promise<Payment[]> {
     if (error) throw new Error(error.message);
 
     const rows = (data ?? []) as Row[];
+    await syncOrderNumbers(rows.map((row) => String(row.order_id)));
     return Promise.all(
         rows.map(async (r) => {
             let proofImage: string | undefined;
@@ -616,6 +675,13 @@ export type PaymentHistoryRange = "week" | "month" | "all";
 
 const RANGE_DAYS: Record<PaymentHistoryRange, number> = { week: 7, month: 30, all: 0 };
 
+async function applyOrderNumbers<T extends { orderId: string; orderNumber: string }>(
+    rows: T[],
+): Promise<T[]> {
+    await syncOrderNumbers(rows.map((row) => row.orderId));
+    return rows.map((row) => ({ ...row, orderNumber: orderNumber(row.orderId) }));
+}
+
 /**
  * Recent payments with a fresh signed URL for every uploaded screenshot.
  * Tries the `payment_history` RPC first (which includes order context and
@@ -664,7 +730,7 @@ export async function fetchPaymentHistory(
                 } satisfies PaymentHistoryRow;
             }),
         );
-        return { rows: withProof, missingFn: false };
+        return { rows: await applyOrderNumbers(withProof), missingFn: false };
     }
 
     // If the error is NOT a missing-function error, surface it.
@@ -727,10 +793,16 @@ export async function fetchPaymentHistory(
             .limit(500);
 
         if (fallbackError2) throw new Error(fallbackError2.message);
-        return { rows: await mapFallbackRows(sb, fallbackData2 ?? []), missingFn: false };
+        return {
+            rows: await applyOrderNumbers(await mapFallbackRows(sb, fallbackData2 ?? [])),
+            missingFn: false,
+        };
     }
 
-    return { rows: await mapFallbackRows(sb, fallbackData ?? []), missingFn: false };
+    return {
+        rows: await applyOrderNumbers(await mapFallbackRows(sb, fallbackData ?? [])),
+        missingFn: false,
+    };
 }
 
 /** Map raw fallback rows (no RPC) into PaymentHistoryRow objects. */

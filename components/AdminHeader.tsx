@@ -14,6 +14,7 @@ import {
   LogOut,
   QrCode,
   UtensilsCrossed,
+  Users,
 } from "lucide-react";
 import { signOutStaff } from "@/lib/supabase";
 import {
@@ -33,6 +34,7 @@ const adminNav = [
   { label: "Table QR Codes", href: "/admin/tables", icon: QrCode },
   { label: "Payment History", href: "/admin/payment-history", icon: CreditCard },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+  { label: "Staff Accounts", href: "/admin/staff", icon: Users },
 ];
 
 type StaffNotification = {
@@ -48,6 +50,11 @@ export default function AdminHeader({ title }: AdminHeaderProps) {
   const { lang, setLang, t } = useStaffLang();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<StaffNotification[]>([]);
+  const [staffRole, setStaffRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStaffRole(localStorage.getItem("staff_role"));
+  }, []);
 
   useEffect(() => {
     try {
@@ -86,6 +93,17 @@ export default function AdminHeader({ title }: AdminHeaderProps) {
   }, [notifications]);
 
   const unreadNotifications = notifications.filter((item) => !item.read).length;
+  const normalizedRole = staffRole?.toLowerCase().replace(/[\s-]/g, "_");
+  const isSuperAdmin = normalizedRole === "super_admin" || normalizedRole === "owner";
+  const visibleAdminNav = adminNav.filter(
+    (link) => {
+      if (link.href === "/admin/staff") return normalizedRole === "admin" || isSuperAdmin;
+      if (link.href === "/admin/analytics" || link.href === "/admin/payment-accounts") {
+        return isSuperAdmin;
+      }
+      return true;
+    },
+  );
 
   const markNotificationRead = (id: string) => {
     setNotifications((previous) =>
@@ -173,7 +191,7 @@ export default function AdminHeader({ title }: AdminHeaderProps) {
         </div>
 
         <nav className="space-y-1">
-          {adminNav.map((link) => {
+          {visibleAdminNav.map((link) => {
             const Icon = link.icon;
             const isActive = pathname === link.href;
 
@@ -242,7 +260,7 @@ export default function AdminHeader({ title }: AdminHeaderProps) {
         </div>
 
         <nav className="mt-3 flex items-center gap-1 overflow-x-auto hide-scrollbar lg:hidden">
-          {adminNav.map((link) => {
+          {visibleAdminNav.map((link) => {
             const Icon = link.icon;
             const isActive = pathname === link.href;
 

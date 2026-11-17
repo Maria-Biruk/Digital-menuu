@@ -4,7 +4,7 @@
 -- Password management needs one row per staff login (name + role + the auth
 -- email behind it). `staff_users` has no email column, and auth.users is not
 -- exposed to PostgREST, so this SECURITY DEFINER function returns the joined
--- list — active staff only, Super Admin / owner only.
+-- list — active and inactive staff, Super Admin / owner only.
 --
 -- The password change itself goes through the service-role API route
 -- (app/api/admin/staff-users/route.ts), never through the browser.

@@ -52,12 +52,15 @@ function timeAgo(iso: string, t: (k: string) => string): string {
 function WaiterFloorContent() {
   const t = useT();
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketsLoaded, setTicketsLoaded] = useState(false);
   const [callAlerts, setCallAlerts] = useState<CallWaiterAlert[]>([]);
+  const [callsLoaded, setCallsLoaded] = useState(false);
   const [browsingTables, setBrowsingTables] = useState<TableActivity[]>([]);
 
   const loadTickets = useCallback(async () => {
     try {
       setTickets(await fetchFloorTickets());
+      setTicketsLoaded(true);
     } catch (err) {
       console.error("Failed to load tickets", err);
     }
@@ -66,6 +69,7 @@ function WaiterFloorContent() {
   const loadCalls = useCallback(async () => {
     try {
       setCallAlerts(await fetchWaiterCalls());
+      setCallsLoaded(true);
     } catch (err) {
       console.error("Failed to load waiter calls", err);
     }
@@ -112,11 +116,13 @@ function WaiterFloorContent() {
     callAlerts,
     (c) => c.id,
     (c) => ({ title: t("Waiter Called"), message: `🔔 ${c.table_label} ${t("needs assistance")}` }),
+    callsLoaded,
   );
   const { toast: readyToast, dismiss: dismissReady } = useNewArrivalNotifier(
     readyTickets,
     (tk) => `${tk.id}:ready`,
     (tk) => ({ title: t("Order Ready"), message: `✅ #${orderNumber(tk.order_id)} · ${tk.table_label} ${t("is ready to serve")}` }),
+    ticketsLoaded,
   );
 
   return (

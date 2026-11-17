@@ -32,11 +32,13 @@ function KitchenConsoleContent() {
   const [mounted, setMounted] = useState(false);
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [ticketsLoaded, setTicketsLoaded] = useState(false);
   const [kitchenMenu, setKitchenMenu] = useState<MenuItem[]>([]);
 
   const loadTickets = useCallback(async () => {
     try {
       setTickets(await fetchStationTickets("kitchen"));
+      setTicketsLoaded(true);
     } catch (err) {
       console.error("Failed to load kitchen tickets", err);
     }
@@ -64,6 +66,7 @@ function KitchenConsoleContent() {
       title: t("New Kitchen Order"),
       message: `🍳 #${orderNumber(tk.order_id)} · ${tk.table_label}: ${tk.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}`,
     }),
+    ticketsLoaded,
   );
 
   const handleAdvance = async (ticketId: string) => {

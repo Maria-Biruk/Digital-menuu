@@ -5,8 +5,15 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Lock, ShieldAlert, ArrowLeft, LogOut, ShieldCheck, Home } from "lucide-react";
 import { StaffRole } from "@/lib/types";
-import { getRoleInfo, canAccessRoute } from "@/lib/permissions";
+import { getRoleInfo, canAccessRoute, getStaffHomeRoute } from "@/lib/permissions";
 import { useStaffLang } from "@/lib/i18n/staff";
+import { signOutStaff, supabaseBrowser } from "@/lib/supabase";
+
+async function leaveStaffSession(router: ReturnType<typeof useRouter>) {
+  localStorage.removeItem("staff_role");
+  await signOutStaff();
+  router.replace("/admin/login");
+}
 
 interface RoleGuardProps {
   children: React.ReactNode;
@@ -26,12 +33,61 @@ export default function RoleGuard({
   const { t } = useStaffLang();
   const [mounted, setMounted] = useState(false);
   const [role, setRole] = useState<string | null>(null);
+  const allowedRolesKey = allowedRoles?.join("|") ?? "";
 
   useEffect(() => {
-    setMounted(true);
-    const saved = localStorage.getItem("staff_role");
-    setRole(saved);
-  }, []);
+    let active = true;
+    let checking = false;
+    const verifySession = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const { data, error } = await supabaseBrowser().rpc("staff_session_context");
+        const context = Array.isArray(data) ? data[0] : data;
+        if (error) throw new Error(error.message);
+        if (!context || !context.is_active || context.approval_status !== "approved") {
+          localStorage.removeItem("staff_role");
+          await signOutStaff();
+          if (active) {
+            setRole(null);
+            setMounted(true);
+            router.replace("/admin/login");
+          }
+          return;
+        }
+        const verifiedRole = String(context.role ?? "");
+        localStorage.setItem("staff_role", verifiedRole);
+        if (active) {
+          setRole(verifiedRole);
+          setMounted(true);
+          const roleInfo = getRoleInfo(verifiedRole);
+          const isAllowed = requireSuperAdmin
+            ? roleInfo.role === "super_admin" || roleInfo.role === "owner"
+            : allowedRoles
+              ? roleInfo.role === "super_admin" || roleInfo.role === "owner" || allowedRoles.includes(roleInfo.role)
+              : canAccessRoute(verifiedRole, pathname);
+          if (!isAllowed) router.replace(getStaffHomeRoute(verifiedRole));
+        }
+      } catch (error) {
+        console.error("Could not verify staff session", error);
+        localStorage.removeItem("staff_role");
+        await signOutStaff();
+        if (active) {
+          setRole(null);
+          setMounted(true);
+          router.replace("/admin/login");
+        }
+      } finally {
+        checking = false;
+      }
+    };
+    void verifySession();
+    const interval = window.setInterval(() => void verifySession(), 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [allowedRolesKey, pathname, requireSuperAdmin, router]);
 
   if (!mounted) {
     return (
@@ -109,8 +165,7 @@ export default function RoleGuard({
             </button>
             <button
               onClick={() => {
-                localStorage.removeItem("staff_role");
-                router.push("/admin/login");
+                void leaveStaffSession(router);
               }}
               className="w-full py-2.5 rounded-xl bg-transparent hover:bg-white/5 text-stone-400 hover:text-white font-semibold text-xs transition-colors cursor-pointer border border-stone-800"
             >
@@ -160,8 +215,7 @@ export default function RoleGuard({
             </button>
             <button
               onClick={() => {
-                localStorage.removeItem("staff_role");
-                router.push("/admin/login");
+                void leaveStaffSession(router);
               }}
               className="w-full py-2.5 rounded-xl bg-transparent hover:bg-white/5 text-stone-400 hover:text-white font-semibold text-xs transition-colors cursor-pointer border border-stone-800 flex items-center justify-center gap-1.5"
             >

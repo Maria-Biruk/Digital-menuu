@@ -58,16 +58,16 @@ export interface DinerNotification {
   ts: number;
 }
 
-/** Save order updates in the menu's notification inbox and sync open tabs. */
-export function saveDinerNotification(notification: DinerNotification): void {
-  if (typeof window === 'undefined') return;
+/** Save order updates once, then sync open tabs. Returns false for duplicates. */
+export function saveDinerNotification(notification: DinerNotification): boolean {
+  if (typeof window === 'undefined') return false;
   try {
     const saved = localStorage.getItem('dm_order_notifications');
     const parsed: unknown = saved ? JSON.parse(saved) : [];
     const existing = Array.isArray(parsed)
       ? (parsed as DinerNotification[])
       : [];
-    if (existing.some((item) => item.id === notification.id)) return;
+    if (existing.some((item) => item.id === notification.id)) return false;
     localStorage.setItem(
       'dm_order_notifications',
       JSON.stringify([notification, ...existing].slice(0, 20)),
@@ -75,8 +75,10 @@ export function saveDinerNotification(notification: DinerNotification): void {
     window.dispatchEvent(
       new CustomEvent('diner-order-notification', { detail: notification }),
     );
+    return true;
   } catch (error) {
     console.error('Could not save diner order notification', error);
+    return true;
   }
 }
 
@@ -115,12 +117,14 @@ export function useNewArrivalNotifier<T>(
   items: T[],
   idOf: (item: T) => string,
   describe: (item: T) => { title: string; message: string },
+  ready = true,
 ): { toast: StationToast | null; dismiss: () => void } {
   const seen = useRef<Set<string> | null>(null);
   const [toast, setToast] = useState<StationToast | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
+    if (!ready) return;
     const ids = items.map(idOf);
     if (seen.current === null) {
       // First snapshot after load: remember, don't alert.
@@ -138,13 +142,13 @@ export function useNewArrivalNotifier<T>(
     const text = fresh.length > 1 ? `${message} (+${fresh.length - 1} more)` : message;
 
     playChime();
-    pushNotification(title, text);
+    if (document.visibilityState === 'hidden') pushNotification(title, text);
     publishStaffNotification(title, text);
     setToast({ message: text, kind: 'info' });
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setToast(null), 7000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
+  }, [items, ready]);
 
   const dismiss = useCallback(() => {
     clearTimeout(timer.current);

@@ -1,92 +1,62 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import {
+  authenticateStaffRequest,
+  isSuperAdminRole,
+  isRestaurantAdminRole,
+} from "@/lib/server/staff-admin";
 
-// Server-only client. The service role key bypasses RLS, so this route is the
-// ONE place allowed to mutate another staff member's auth password — and it
-// only proceeds after confirming the caller is themselves a Super Admin.
-function adminClient() {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-    const serviceKey =
-        process.env.SUPABASE_SERVICE_ROLE_KEY ??
-        process.env.SUPABASE_SERVICE_KEY ??
-        process.env.SERVICE_ROLE_KEY;
-    if (!url || !serviceKey) return null;
-    return createClient(url, serviceKey, {
-        auth: { autoRefreshToken: false, persistSession: false },
-    });
-}
+export const runtime = "nodejs";
 
-/** Read the bearer token the browser Supabase client attaches to requests. */
-function bearer(req: NextRequest): string | null {
-    const h = req.headers.get("authorization") || req.headers.get("Authorization");
-    if (!h) return null;
-    const [scheme, token] = h.split(" ");
-    return scheme?.toLowerCase() === "bearer" && token ? token : null;
-}
+export async function POST(request: NextRequest) {
+  const result = await authenticateStaffRequest(request);
+  if ("error" in result) {
+    return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
+  }
 
-async function callerIsSuperAdmin(
-    sb: NonNullable<ReturnType<typeof adminClient>>,
-    token: string,
-): Promise<boolean> {
-    const { data } = await sb.auth.getUser(token);
-    const uid = data?.user?.id;
-    if (!uid) return false;
-    const { data: staff } = await sb
-        .from("staff_users")
-        .select("role, is_active")
-        .eq("id", uid)
-        .maybeSingle();
-    if (!staff || staff.is_active === false) return false;
-    const role = String(staff.role ?? "").toLowerCase();
-    return role.includes("super") || role.includes("owner");
-}
+  const { client, staff } = result.context;
+  const superAdmin = isSuperAdminRole(staff.role);
+  if (!superAdmin && !isRestaurantAdminRole(staff.role)) {
+    return NextResponse.json({ ok: false, error: "Only an Admin or Super Admin can manage staff passwords." }, { status: 403 });
+  }
 
-export async function POST(req: NextRequest) {
-    const sb = adminClient();
-    if (!sb) {
-        return NextResponse.json(
-            {
-                ok: false,
-                error:
-                    "Password management needs the SUPABASE_SERVICE_ROLE_KEY secret. Add it to .env.local and restart the server.",
-            },
-            { status: 501 },
-        );
-    }
+  let body: { staffUserId?: unknown; newPassword?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid request body." }, { status: 400 });
+  }
+  const staffUserId = typeof body.staffUserId === "string" ? body.staffUserId.trim() : "";
+  const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+  if (!staffUserId) {
+    return NextResponse.json({ ok: false, error: "Missing staff user id." }, { status: 400 });
+  }
+  if (newPassword.length < 8) {
+    return NextResponse.json({ ok: false, error: "Password must be at least 8 characters." }, { status: 400 });
+  }
 
-    const token = bearer(req);
-    if (!token) {
-        return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
-    }
-    if (!(await callerIsSuperAdmin(sb, token))) {
-        return NextResponse.json(
-            { ok: false, error: "Only a Super Admin can reset staff passwords." },
-            { status: 403 },
-        );
-    }
+  const { data: target, error: targetError } = await client
+    .from("staff_users")
+    .select("role, restaurant_id")
+    .eq("id", staffUserId)
+    .maybeSingle();
+  if (targetError) {
+    console.error("Could not verify staff account for password reset:", targetError.message);
+    return NextResponse.json({ ok: false, error: "Could not verify the staff account." }, { status: 500 });
+  }
+  if (!target) {
+    return NextResponse.json({ ok: false, error: "Staff account not found." }, { status: 404 });
+  }
+  const targetRole = String(target.role).toLowerCase();
+  if ((targetRole === "admin" || isSuperAdminRole(targetRole)) && !superAdmin) {
+    return NextResponse.json({ ok: false, error: "Only a Super Admin can manage Admin accounts." }, { status: 403 });
+  }
+  if (!superAdmin && target.restaurant_id !== staff.restaurant_id) {
+    return NextResponse.json({ ok: false, error: "You can only manage staff at your restaurant." }, { status: 403 });
+  }
 
-    let body: { staffUserId?: string; newPassword?: string };
-    try {
-        body = await req.json();
-    } catch {
-        return NextResponse.json({ ok: false, error: "Invalid request body." }, { status: 400 });
-    }
-
-    const staffUserId = String(body.staffUserId ?? "").trim();
-    const newPassword = String(body.newPassword ?? "");
-    if (!staffUserId) {
-        return NextResponse.json({ ok: false, error: "Missing staff user id." }, { status: 400 });
-    }
-    if (newPassword.length < 6) {
-        return NextResponse.json(
-            { ok: false, error: "Password must be at least 6 characters." },
-            { status: 400 },
-        );
-    }
-
-    const { error } = await sb.auth.admin.updateUserById(staffUserId, { password: newPassword });
-    if (error) {
-        return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-    }
-    return NextResponse.json({ ok: true });
+  const { error } = await client.auth.admin.updateUserById(staffUserId, { password: newPassword });
+  if (error) {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
 }

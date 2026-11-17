@@ -23,10 +23,10 @@
   --color-light-text: #2B1810;      /* dark espresso text */
   --color-light-muted: #7A5C45;     /* muted mocha */
 
-  /* Unified coffee-brown theme (dark) — warm milk-chocolate, matching the reference */
-  --coffee-hi: #9a6846;             /* caramel glow (top) */
-  --coffee-mid: #8c5a3c;            /* milk-chocolate (main canvas) */
-  --coffee-lo: #7c4d31;             /* deeper coffee (base) */
+  /* Deep coffee-brown canvas keeps light terminal text readable. */
+  --coffee-hi: #563824;
+  --coffee-mid: #3f291c;
+  --coffee-lo: #2a1c14;
 }
 
 /* Global canvas so every page shares the same coffee background (and no white flash). */
@@ -39,7 +39,7 @@ body {
 /* Shared dark background — the cozy coffee-brown gradient used across all pages. */
 .app-bg-dark {
   background:
-    radial-gradient(1100px 520px at 50% -8%, rgba(224, 176, 122, 0.45), transparent 62%),
+    radial-gradient(1100px 520px at 50% -8%, rgba(224, 176, 122, 0.18), transparent 62%),
     linear-gradient(180deg, var(--coffee-hi) 0%, var(--coffee-mid) 46%, var(--coffee-lo) 100%);
   background-attachment: fixed;
 }

@@ -26,13 +26,14 @@ export const ROLE_CONFIG: Record<string, RoleInfo> = {
       '/admin/payment-accounts',
       '/admin/tables',
       '/admin/payment-history',
+      '/admin/staff',
       '/admin/analytics',
       '/staff/kitchen',
       '/staff/bar',
       '/staff/floor',
       '/staff/payments',
     ],
-    homeRoute: '/admin/menu',
+    homeRoute: '/super-admin',
     canManagePaymentAccounts: true,
     canManageUsers: true,
     canViewFullAnalytics: true,
@@ -55,7 +56,7 @@ export const ROLE_CONFIG: Record<string, RoleInfo> = {
       '/staff/floor',
       '/staff/payments',
     ],
-    homeRoute: '/admin/menu',
+    homeRoute: '/super-admin',
     canManagePaymentAccounts: true,
     canManageUsers: true,
     canViewFullAnalytics: true,
@@ -66,18 +67,16 @@ export const ROLE_CONFIG: Record<string, RoleInfo> = {
     label: 'Admin (Limited)',
     badge: 'Admin · Limited Access',
     badgeClass: 'bg-blue-950/80 text-blue-300 border-blue-600/50',
-    description: 'Operational manager. Can manage Menu items and Table QR codes, and view stations. Financial Payment Accounts and Master Analytics are restricted to Super Admin.',
+    description: 'Restaurant manager. Can manage menu, tables, payment history, and staff for the assigned restaurant.',
     allowedRoutes: [
       '/admin/menu',
       '/admin/tables',
       '/admin/payment-history',
-      '/staff/kitchen',
-      '/staff/bar',
-      '/staff/floor',
+      '/admin/staff',
     ],
-    homeRoute: '/admin/menu',
+    homeRoute: '/admin',
     canManagePaymentAccounts: false,
-    canManageUsers: false,
+    canManageUsers: true,
     canViewFullAnalytics: false,
     canAccessAllStations: false,
   },
@@ -139,14 +138,25 @@ export const ROLE_CONFIG: Record<string, RoleInfo> = {
     badge: 'Cashier Terminal · Restricted',
     badgeClass: 'bg-amber-950/80 text-amber-300 border-amber-600/50',
     description: 'Payment verification and walk-in POS billing terminal. Station-isolated from Admin settings and Kitchen terminals.',
-    allowedRoutes: ['/staff/payments'],
-    homeRoute: '/staff/payments',
+    allowedRoutes: ['/staff/payments', '/staff/cashier'],
+    homeRoute: '/staff/cashier',
     canManagePaymentAccounts: false,
     canManageUsers: false,
     canViewFullAnalytics: false,
     canAccessAllStations: false,
   },
 };
+
+export function getStaffHomeRoute(role: string | null | undefined): string {
+  const normalized = role?.toLowerCase().replace(/[\s-]/g, '_');
+  if (normalized === 'super_admin' || normalized === 'owner') return '/super-admin';
+  if (normalized === 'admin') return '/admin';
+  if (normalized === 'kitchen') return '/staff/kitchen';
+  if (normalized === 'bar' || normalized === 'bartender') return '/staff/bar';
+  if (normalized === 'waiter') return '/staff/floor';
+  if (normalized === 'cashier') return '/staff/cashier';
+  return '/admin/login';
+}
 
 export function getRoleInfo(role: string | null | undefined): RoleInfo {
   if (!role) {
@@ -183,14 +193,23 @@ export function getRoleInfo(role: string | null | undefined): RoleInfo {
   if (normalized.includes('waiter') || normalized.includes('floor')) {
     return ROLE_CONFIG['waiter'];
   }
-  return ROLE_CONFIG['admin'];
+  return {
+    ...ROLE_CONFIG['waiter'],
+    label: 'Unassigned Staff Role',
+    description: 'This account does not have a supported staff role.',
+    allowedRoutes: [],
+    homeRoute: '/admin/login',
+  };
 }
 
 export function canAccessRoute(role: string | null | undefined, pathname: string): boolean {
   if (!role) return false;
   const info = getRoleInfo(role);
   if (info.role === 'super_admin' || info.role === 'owner') return true;
+  if (pathname === '/admin') return info.role === 'admin';
 
   // Direct match or subpath match in allowedRoutes
-  return info.allowedRoutes.some((route) => pathname.startsWith(route));
+  return info.allowedRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
 }
