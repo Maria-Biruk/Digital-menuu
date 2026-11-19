@@ -667,6 +667,10 @@ export default function DigitalMenuView({
       }
       rememberOrder(newOrderId);
       setCartLines([]);
+      // Web Push: notify cashier of new order (fire-and-forget)
+      void import("@/lib/push").then(({ sendPushEvent }) =>
+        sendPushEvent("new_order", { orderId: newOrderId })
+      );
       router.push(
         `/${slug}/order/${newOrderId}?table=${effTableId}&lang=${lang}`,
       );
@@ -714,6 +718,10 @@ export default function DigitalMenuView({
       rememberOrder(newOrderId);
       setSelectedDish(null);
       const cleanPhone = encodeURIComponent(modalPhone.trim() || "");
+      // Web Push: notify cashier of new direct order (fire-and-forget)
+      void import("@/lib/push").then(({ sendPushEvent }) =>
+        sendPushEvent("new_order", { orderId: newOrderId })
+      );
       router.push(
         `/${slug}/order/${newOrderId}?table=${isTakeawayOrder ? "takeaway" : effTableId}&lang=${lang}&phone=${cleanPhone}`,
       );

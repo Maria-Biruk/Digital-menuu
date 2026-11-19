@@ -44,9 +44,11 @@
     ".next-dev-190076/types/**/*.ts",
     ".next-dev-297588/types/**/*.ts",
     ".next-dev-74908/types/**/*.ts",
-    ".next-dev-176720/types/**/*.ts"
+    ".next-dev-176720/types/**/*.ts",
+    ".next-dev-17428/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "backend"
   ]
 }

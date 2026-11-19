@@ -17,6 +17,7 @@ import {
 import { getRoleInfo } from "@/lib/permissions";
 import { signOutStaff } from "@/lib/supabase";
 import { ensureNotifyPermission } from "@/lib/notify";
+import { subscribeToPush } from "@/lib/push";
 import { STAFF_LANG_LABEL, useStaffLang, type StaffLang } from "@/lib/i18n/staff";
 import { Languages } from "lucide-react";
 
@@ -97,7 +98,11 @@ export default function StaffHeader({
   const toggleNotifications = () => {
     const opening = !notificationsOpen;
     setNotificationsOpen(opening);
-    if (opening) void ensureNotifyPermission();
+    if (opening) {
+      void ensureNotifyPermission();
+      // Also register for Web Push so notifications arrive even when tab is closed
+      void subscribeToPush('staff', { role: role ?? undefined });
+    }
   };
 
   const allNavLinks = [

@@ -39,6 +39,11 @@ import {
   ensureNotifyPermission,
   type DinerNotification,
 } from "@/lib/notify";
+import {
+  subscribeToPush,
+  isPushSupported,
+  getPushPermissionState,
+} from "@/lib/push";
 import { orderNumber } from "@/lib/order-number";
 import type { OrderStatus, PaymentAccount, Table } from "@/lib/types";
 
@@ -175,6 +180,9 @@ function OrderStatusPageContent() {
   const [notifications, setNotifications] = useState<DinerNotification[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const unreadNotifications = notifications.filter((notification) => !notification.read).length;
+
+  // Push subscription state for customer
+  const [pushSubscribed, setPushSubscribed] = useState(false);
 
   const loadTrackedOrders = useCallback(async () => {
     setTrackedOrdersLoading(true);
@@ -831,6 +839,12 @@ function OrderStatusPageContent() {
                 setNotificationsOpen(opening);
                 if (opening) {
                   void ensureNotifyPermission();
+                  // Also subscribe to browser push (customer flow, user gesture)
+                  if (isPushSupported() && getPushPermissionState() !== 'denied' && !pushSubscribed) {
+                    void subscribeToPush('customer', { orderId }).then(({ ok }) => {
+                      if (ok) setPushSubscribed(true);
+                    });
+                  }
                   const read = notifications.map((notification) => ({
                     ...notification,
                     read: true,
@@ -1400,6 +1414,31 @@ function OrderStatusPageContent() {
                   paymentConfirmed={paymentApproved}
                   orderKind={orderKind}
                 />
+              )}
+
+              {/* Customer push-notification subscribe button — shown when order is active and not yet served */}
+              {effectiveStatus !== "cancelled" && effectiveStatus !== "served" &&
+                typeof window !== "undefined" && isPushSupported() &&
+                getPushPermissionState() !== "denied" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void subscribeToPush('customer', { orderId }).then(({ ok }) => {
+                      if (ok) setPushSubscribed(true);
+                    });
+                  }}
+                  disabled={pushSubscribed}
+                  className={`w-full mt-2 flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition-all ${
+                    pushSubscribed
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700 cursor-default"
+                      : "border-amber-500/40 bg-[#2B1810] text-amber-200 hover:bg-[#3D2415]"
+                  }`}
+                >
+                  <Bell className="w-3.5 h-3.5 shrink-0" />
+                  {pushSubscribed
+                    ? "Push notifications on ✓"
+                    : "Notify me when my order is ready"}
+                </button>
               )}
 
               <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs text-stone-500">

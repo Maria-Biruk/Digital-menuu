@@ -13,6 +13,7 @@ import { Ticket, TicketStatus, MenuItem } from "@/lib/types";
 import { signOutStaff } from "@/lib/supabase";
 import { loc, useStaffLang } from "@/lib/i18n/staff";
 import { publishStaffNotification } from "@/lib/notify";
+import { sendPushEvent } from "@/lib/push";
 import { UtensilsCrossed, ToggleLeft, ToggleRight, Sparkles, RefreshCw, ShieldAlert, Lock, ArrowLeft } from "lucide-react";
 
 import RoleGuard from "@/components/RoleGuard";
@@ -79,11 +80,16 @@ function KitchenConsoleContent() {
     else return; // already ready
     try {
       await setTicketStatus(ticketId, nextStatus);
-      if (nextStatus === "preparing") {
+      // Web Push: notify customer + (on ready) waiter
+      if (nextStatus === 'preparing') {
+        sendPushEvent('ticket_preparing', { ticketId, ticketStation: 'kitchen' });
         publishStaffNotification(
           t("Order Started"),
           `#${orderNumber(ticket.order_id)} · ${t("Order is being prepared.")}`,
         );
+      }
+      if (nextStatus === 'ready') {
+        sendPushEvent('ticket_ready', { ticketId });
       }
       await loadTickets();
     } catch (err) {

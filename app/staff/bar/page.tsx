@@ -13,6 +13,7 @@ import { Ticket, TicketStatus, MenuItem } from "@/lib/types";
 import { signOutStaff } from "@/lib/supabase";
 import { loc, useStaffLang } from "@/lib/i18n/staff";
 import { Wine, ToggleLeft, ToggleRight, Coffee, GlassWater, ShieldAlert, Lock, ArrowLeft } from "lucide-react";
+import { sendPushEvent } from "@/lib/push";
 
 import RoleGuard from "@/components/RoleGuard";
 
@@ -78,6 +79,9 @@ function BarConsoleContent() {
     else return; // already ready
     try {
       await setTicketStatus(ticketId, nextStatus);
+      // Web Push: notify customer + (on ready) waiter
+      if (nextStatus === 'preparing') sendPushEvent('ticket_preparing', { ticketId, ticketStation: 'bar' });
+      if (nextStatus === 'ready')     sendPushEvent('ticket_ready', { ticketId });
       await loadTickets();
     } catch (err) {
       console.error("Failed to advance ticket", err);

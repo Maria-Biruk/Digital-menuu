@@ -13,6 +13,7 @@ import { Payment } from "@/lib/types";
 import { CreditCard, ShieldCheck, UserPlus, Receipt, CheckCircle, AlertCircle, History } from "lucide-react";
 import { useStaffLang } from "@/lib/i18n/staff";
 import { publishStaffNotification } from "@/lib/notify";
+import { sendPushEvent } from "@/lib/push";
 
 import RoleGuard from "@/components/RoleGuard";
 
@@ -110,6 +111,8 @@ function CashierPaymentsContent() {
       if (!payment) {
         throw new Error("Payment approved, but its order could not be identified for kitchen dispatch.");
       }
+      // Web Push: notify the customer their payment was approved
+      sendPushEvent('payment_approved', { paymentId, orderId: payment.order_id });
       publishStaffNotification(
         t("Payment Approved"),
         `#${orderNumber(payment.order_id)} · ${t("Payment confirmed and sent to the kitchen.")}`,
@@ -124,6 +127,8 @@ function CashierPaymentsContent() {
   const handleReject = async (paymentId: string) => {
     try {
       await rejectPayment(paymentId);
+      // Web Push: notify the customer their payment was rejected
+      sendPushEvent('payment_rejected', { paymentId });
       await loadPayments();
       showNotification(t("Payment rejected. Customer notified to upload valid proof."));
     } catch (err) {
